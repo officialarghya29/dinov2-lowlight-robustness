@@ -214,8 +214,13 @@ for name, param in classifier.backbone.named_parameters():
         param.requires_grad = True
 
 # Optimizer with different LR for backbone (LoRA) vs head
-lora_params = [p for n, p in classifier.named_parameters() if "lora" in n and p.requires_grad]
+# Disjoint param groups: head must not appear in both groups (AdamW would raise
+# "some parameters appear in more than one parameter group"). Note: PEFT wraps the
+# model, so LoRA param names contain "lora" regardless of nesting depth.
 head_params = list(classifier.head.parameters())
+head_ids = {id(p) for p in head_params}
+lora_params = [p for n, p in classifier.named_parameters()
+               if "lora" in n and p.requires_grad and id(p) not in head_ids]
 
 optimizer = torch.optim.AdamW([
     {"params": lora_params, "lr": 5e-5, "weight_decay": 0.01},

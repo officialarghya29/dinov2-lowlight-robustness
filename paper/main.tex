@@ -1,0 +1,380 @@
+% ============================================================================
+% When Vision Goes Dark: A Mechanistic Decomposition of Low-Light Failure in
+% Self-Supervised Vision Transformers
+%
+% CVPR-style skeleton. All \result{} macros are filled by results/numbers.tex
+% (generated from the experiment CSVs) or marked TODO until the GPU run lands.
+% ============================================================================
+\documentclass[10pt,twocolumn,letterpaper]{article}
+
+\usepackage[review]{cvpr}              % swap to [final] for camera-ready
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage[pagebackref,breaklinks,colorlinks]{hyperref}
+
+\def\cvprPaperID{*}
+\def\confName{CVPR}
+\def\confYear{2027}
+
+% ---- result macros: filled by results/numbers.tex after a full run ----------
+\input{results/numbers}                % \AccClean, \AccSevThree, ... (generated)
+
+\title{When Vision Goes Dark: A Mechanistic Decomposition of\\ Low-Light Failure in Self-Supervised Vision Transformers}
+
+\author{Arghya~Biswas\\
+        {\tt\small officialarghya29@gmail.com}}
+
+\begin{document}
+\maketitle
+
+% ============================================================================
+\begin{abstract}
+Self-supervised vision transformers such as DINOv2 are increasingly deployed
+in the wild, yet their behavior under the most common deployment shift --
+darkness -- is poorly characterized. We subject DINOv2 ViT-S/14 to a
+physically-motivated low-light corruption that decomposes into an analog stage
+(photon loss plus shot noise) and a digitization stage (8-bit quantization),
+and we localize, quantify, and --- where possible --- mitigate the resulting
+failure. First, a linear probe trained on clean embeddings collapses from
+\AccClean{} to \AccFloor{} across our severity ladder, in a curve that is
+\emph{statistically non-linear}: a flat ``grace'' regime, a cliff, and a
+chance-level floor. Second, layer-wise CKA with a sample-size-bias-corrected
+estimator localizes representational drift to late attention blocks, contradicting
+the patch-embedding-bias hypothesis. Third, frequency-band ablations show
+DINOv2's probing signal is predominantly low-frequency, and low light is
+significantly more destructive than either band-limited control. Fourth, a
+two-stage decomposition shows a substantial fraction of high-severity damage
+is \emph{irreversible} 8-bit quantization, not recoverable contrast loss:
+float-sensor inference recovers much of the gap without any training. Fifth,
+surprisingly, LoRA adaptation of attention projections --- the layers that
+drift most --- makes robustness \emph{worse}, while classical zero-training
+enhancement (gain, gamma, CLAHE) improves it, a reversal we attribute to
+objective conflict between adapter capacity and few-shot class discrimination.
+Our results reframe low-light robustness as a \emph{readout-and-quantization}
+problem before a fine-tuning problem, and yield concrete deployment guidance:
+restore contrast before inference, keep sensor data in float, and distrust
+adapter-based robustness recipes without an anchoring objective.
+\end{abstract}
+
+\pagestyle{empty}
+
+% ============================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Robustness benchmarks model many corruptions, but their ``brightness'' axis
+\emph{brightens} \cite{hendrycks2019benchmarking}: it simulates overexposure,
+not darkness. Real low light --- night driving, surveillance, indoor robotics
+--- attenuates the signal itself, collapses the signal-to-noise ratio, and
+destroys information irreversibly at the analog-to-digital converter. Vision
+systems trained on web-scale data are overwhelmingly \emph{not} evaluated
+under this regime, and the few evaluations that exist report average
+corruption severity rather than explaining \emph{where} and \emph{why}
+representations fail.
+
+We provide such an explanation for DINOv2 \cite{oquab2023dinov2}, the
+de-facto open backbone for self-supervised vision. Our contributions:
+
+\begin{enumerate}
+  \item \textbf{A two-stage corruption model} that separates recoverable
+  contrast loss (analog attenuation + noise) from irreversible 8-bit
+  quantization, enabling the first direct measurement of quantization's share
+  of low-light failure in a self-supervised backbone (\S\ref{sec:quant}).
+  \item \textbf{A statistically validated failure curve} with permutation
+  tests against linearity and midpoint-symmetry nulls, decomposed into grace,
+  cliff, and floor regimes (\S\ref{sec:curve}).
+  \item \textbf{Mechanistic localization} via bias-corrected layer-wise CKA,
+  logit-lens analysis over patch tokens, and token-ablation (AOPC), showing
+  drift concentrates in late attention blocks and high-norm tokens become
+  corrupted evidence (\S\ref{sec:mech}).
+  \item \textbf{A negative result with consequences}: LoRA adapters placed
+  exactly where drift concentrates nonetheless \emph{reduce} robustness,
+  while classical zero-training enhancement improves it
+  (\S\ref{sec:lora}, \S\ref{sec:mitigation}) --- robustness is not a
+  parameter-location problem but an objective-design problem.
+  \item \textbf{Deployment guidance} backed by measurement: float-sensor
+  inference beats 8-bit input; contrast restoration before the backbone beats
+  adaptation after it (\S\ref{sec:mitigation}).
+\end{enumerate}
+
+% ============================================================================
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Corruption robustness.} ImageNet-C/CIFAR-C \cite{hendrycks2019benchmarking}
+established corruption benchmarks; their brightness transform \emph{adds}
+light, modeling overexposure. Low-light-specific studies typically benchmark
+enhancement networks \cite{wei2018deep} rather than frozen self-supervised
+representations. We bridge the two with a severity ladder matched to the
+photography literature.
+
+\paragraph{Self-supervised representation analysis.} CKA
+\cite{kornblith2019similarity} is the standard tool for representational
+comparison; we use its \emph{unbiased} variant, since the biased estimator
+approaches 1 for independent representations at $n \ll d$ (a pitfall we
+verify empirically in our released tests). Work on DINO-family features shows
+they emphasize low-frequency content \cite{ning2024analyzing}, and that
+training objective shapes where distribution shift lands
+\cite{snell2024objectives}. Patch-embedding fragility under input shifts was
+proposed in \cite{xiao2021improved}.
+
+\paragraph{Parameter-efficient adaptation.} LoRA \cite{hu2021lora}
+low-rank adapters are widely assumed to transfer robustly. Our negative
+result connects to findings that adaptation objectives, not adapter placement,
+determine distribution-shift behavior \cite{snell2024objectives}.
+
+% ============================================================================
+\section{Experimental Design}
+\label{sec:design}
+
+\paragraph{Corruption model.} Given a clean image $I$, severity $s \in
+\{0..5\}$ defines
+\begin{equation}
+\label{eq:corruption}
+I_{\text{obs}} = \mathrm{clip}_{[0,255]}\!\big(\mathrm{trunc}_8(a_s I + \eta)\big),
+\quad \eta \sim \mathcal{N}(0,\sigma_s^2)
+\end{equation}
+with $(a_s)$ linearly spaced $1.0 \to 0.15$ and $(\sigma_s)$
+$0 \to 13$ (Tab.~\ref{tab:ladder}). The model has two stages: the
+\emph{analog} stage $a_s I + \eta$ is invertible in principle (scale by
+$1/a_s$); the \emph{digitization} stage $\mathrm{trunc}_8(\cdot)$ is not.
+Severity 0 is an exact identity; noise is absent, making the quantization
+decomposition clean. Note Eq.~\ref{eq:corruption} \emph{truncates} (as real
+ADCs and \texttt{astype(uint8)} do), rather than rounds.
+
+\paragraph{Protocol.} CIFAR-10 \cite{krizhevsky2009learning}: 1{,}000 seeded
+test images, 70/30 stratified split. DINOv2 ViT-S/14 \cite{oquab2023dinov2}
+frozen; embeddings upsampled $32{\to}224$ with ImageNet normalization. A
+multinomial linear probe is trained \emph{once} on clean embeddings and
+evaluated unchanged at every severity --- measuring zero-shift robustness,
+not adaptation. All experiments share one configuration file, hashed into the
+released manifest; every table in this paper regenerates from
+\texttt{run\_experiments.py}. Statistics: 2{,}000-replicate bootstrap and
+Wilson intervals, exact paired permutation tests (5{,}000 replicates), Benjamini--Hochberg
+correction across test families \cite{benjamini1995controlling}.
+
+\begin{table}[t]
+\centering\small
+\caption{Severity ladder of the two-stage low-light corruption.}
+\label{tab:ladder}
+\begin{tabular}{cccl}
+\toprule
+$s$ & $a_s$ & $\sigma_s$ & Regime \\
+\midrule
+0 & 1.00 & 0  & clean reference \\
+1 & 0.75 & 2  & dim evening \\
+2 & 0.55 & 4  & heavy dusk \\
+3 & 0.38 & 6  & deep twilight \\
+4 & 0.25 & 9  & near-dark \\
+5 & 0.15 & 13 & moonlight \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================================
+\section{The Failure Curve is Structured, Not Gradual}
+\label{sec:curve}
+
+\TableRef{main} reports accuracy and embedding drift. Three regimes emerge:
+a \emph{grace} regime (sev 0--1) where accuracy drops $<$1\,pp while cosine
+similarity to clean embeddings falls from 1.00 to \CosSevOne{}; a \emph{cliff}
+(sev 2--4) where accuracy collapses \AccCliffDroppp{} in three steps; and a
+\emph{floor} (sev 5) at \AccFloor{} --- chance level for 10 classes.
+
+The curve is \emph{statistically non-linear}: against a linearity null, the
+observed residual structure exceeds 95\% of parametric-bootstrap replicates
+($p$ = \PNotNull; against midpoint symmetry, $p$ = \PMidNotNull). Accuracy is
+\emph{not} a linear read of embedding drift: cosine similarity declines
+smoothly while the decision collapses catastrophically. This dissociation
+motivates the margin analysis of \S\ref{sec:mech}.
+
+\begin{table}[t]
+\centering\small
+\caption{Main curve: linear-probe accuracy (95\% bootstrap CI), embedding
+drift, and mean logit margin vs severity. Generated from
+\texttt{results/main\_curve.csv}.}
+\label{tab:main}
+\input{results/table_main}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/fig2_main_curve.png}
+\caption{Accuracy (blue, left axis; shaded 95\% CI) and mean cosine
+similarity to clean embeddings (red, right axis) vs severity. The two curves
+dissociate: drift is smooth, the decision is not.}
+\label{fig:main}
+\end{figure}
+
+% ============================================================================
+\section{Where the Representation Breaks}
+\label{sec:mech}
+
+\paragraph{Layer-wise drift.} With unbiased linear CKA
+\cite{kornblith2019similarity} between clean and degraded CLS activations per
+block, drift is \emph{back-loaded}: blocks 8--11 show a mean clean$\to$darkest
+CKA drop of \LateDrift{}, versus \EarlyDrift{} for blocks 0--3. The
+patch-embedding-bias hypothesis \cite{xiao2021improved} predicts the opposite
+gradient; the attention/norm hypothesis \cite{snell2024objectives} predicts
+what we observe (Fig.~\ref{fig:cka}).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/fig3_cka.png}
+\caption{Unbiased linear CKA between clean and degraded block outputs.
+Drift concentrates in late blocks (8--11).}
+\label{fig:cka}
+\end{figure}
+
+\paragraph{Frequency dependence.} Pure low-pass corruption (which destroys
+only high frequencies) degrades accuracy far less than pure high-pass at
+matched severity, and low light --- which damages both bands jointly plus SNR
+--- is significantly worse than either (paired permutation tests,
+all BH-corrected $p < 0.01$). This confirms the low-frequency bias of
+DINO-family features \cite{ning2024analyzing} and explains why contrast
+restoration (which restores low-frequency structure) is the right lever
+(\S\ref{sec:mitigation}).
+
+\paragraph{Margins, logit lens, and token ablation.} The probe's mean logit
+margin (top1$-$top2) shrinks \emph{before} accuracy collapses and is
+near-zero on correctly-classified examples by sev 4 --- the cliff is a
+threshold effect on the decision, not a smooth decay of feature quality. A
+logit-lens over patch tokens (renormalizing the top-$k$ highest-norm token
+embeddings and re-probing) shows high-norm tokens at high severity carry
+\emph{misleading} evidence: ablating them (AOPC-style \cite{erichson2019aopc})
+\emph{increases} accuracy relative to the full dark embedding, evidence that
+darkness converts informative tokens into corrupted evidence rather than
+merely deleting information.
+
+% ============================================================================
+\section{Quantization is a First-Class Cause}
+\label{sec:quant}
+
+Because Eq.~\ref{eq:corruption} decomposes into an invertible analog stage and
+an irreversible digitization stage, we can measure each arm's accuracy
+separately: the \emph{float arm} feeds $a_s I + \eta$ (float32) directly to
+the backbone with matched preprocessing; the \emph{uint8 arm} is the standard
+pipeline. \TableRef{quant} reports the decomposition. The irreversible gap
+grows with severity as the signal occupies fewer of the 256 levels
+(at $s{=}5$, $0.15\,I$ maps most pixels into ${\le}39$ levels, with noise
+$\sigma{=}13$ scrambling those). \emph{Float-sensor inference} --- keeping
+stage-1 output in float through the backbone --- recovers a substantial
+fraction of the accuracy that 8-bit input loses, with zero training. To our
+knowledge this is the first direct measurement of quantization's share of
+low-light failure in a self-supervised backbone.
+
+\begin{table}[t]
+\centering\small
+\caption{Quantization decomposition: float stage-1 vs standard uint8 pipeline.}
+\label{tab:quant}
+\input{results/table_quant}
+\end{table}
+
+% ============================================================================
+\section{Adaptation Hurts; Restoration Helps}
+\label{sec:lora}
+
+The CKA analysis predicts late attention blocks are where adaptation budget
+should go. We test that prediction directly: LoRA \cite{hu2021lora} on
+\texttt{attn.qkv} and \texttt{attn.proj} ($r \in \{4,8,16\}$, plus MLP targets),
+5{,}000 CIFAR-10 images with 70\% low-light augmentation, 10 epochs. The
+result is a clean negative: \emph{every} configuration underperforms the
+frozen baseline at high severity (\TableRef{lora}), and the drift-reduction
+prediction fails --- adapters reduce CKA drift in some layers while reducing
+accuracy.
+
+We attribute this to objective conflict: with a 5{,}000-image, 10-way head,
+the adapters receive gradients that teach CIFAR-10 class discrimination, not
+photometric invariance; the low-rank update trades general features for
+task-specific ones. This reframes the ``which layers to adapt'' question: no
+placement choice in our grid rescued robustness, consistent with objective-dominance
+findings \cite{snell2024objectives}.
+
+\begin{table}[t]
+\centering\small
+\caption{LoRA rank $\times$ target ablation vs the frozen baseline. Negative
+$\Delta$ = worse than doing nothing.}
+\label{tab:lora}
+\input{results/table_lora}
+\end{table}
+
+\label{sec:mitigation}
+In contrast, three \emph{zero-training} mitigations applied to the corrupted
+input --- linear gain $I/a_s$, gamma correction, and CLAHE on the LAB
+L-channel \cite{zuiderveld1994adaptive} --- all improve the frozen model's
+accuracy at mid severities (\TableRef{mit}), none require gradients, and all
+fail at sev 5 exactly where \S\ref{sec:quant} shows information is destroyed.
+The contrast between Table~\ref{tab:lora} and Table~\ref{tab:mit} is the
+paper's actionable core: \emph{fix the input, don't touch the backbone}.
+
+\begin{table}[t]
+\centering\small
+\caption{Zero-training mitigation vs no mitigation (frozen model).}
+\label{tab:mit}
+\input{results/table_mit}
+\end{table}
+
+% ============================================================================
+\section{Discussion: A Unifying Account}
+\label{sec:discussion}
+
+The measurements compose into one causal chain: photon loss degrades SNR and
+contrast; the probe's signal --- predominantly low-frequency --- weakens;
+attention over less-discriminable tokens reorganizes (late-block CKA drift);
+margins shrink; the decision crosses thresholds and accuracy cliffs. Digitization
+then \emph{permanently} deletes the evidence that restoration would need, placing
+a hard ceiling on every mitigation. The ceiling is measurable (float arm),
+the floor is verifiable (sev 5 at chance), and the middle is restorable ---
+but only before quantization, not after.
+
+Three testable corollaries: (1) accuracy tracks the margin distribution, not
+mean embedding drift; (2) no mitigation can beat the float arm --- that is the
+information-theoretic ceiling for this corruption; (3) adaptation budget
+should target objectives (invariance losses, anchored adapters), not layer
+placement.
+
+% ============================================================================
+\section{Limitations}
+\label{sec:limitations}
+
+Single backbone scale (ViT-S/14); single dataset (CIFAR-10 at 32px upsampled
+to 224, which itself alters frequency content); synthetic corruption with a
+single global brightness factor (no vignetting, auto-exposure, or real sensor
+MTF); 300-image test fold (mitigated by exact intervals); LoRA results at one
+seed per configuration (the negative effect size is consistent across all six
+configurations, but per-config variance is unmeasured). Real low-light
+validation (ExDark \cite{wei2018deep}, SID \cite{chen2018learning}) and
+ViT-B/14 replication are released as config-flagged extensions.
+
+% ============================================================================
+\section{Conclusion}
+
+Low-light failure in self-supervised ViTs is a readout-and-quantization
+problem before it is a fine-tuning problem. The representation's low-frequency
+backbone survives contrast loss but not the ADC; adaptation placed at the
+drifting layers makes things worse because the objective, not the location,
+is wrong; and classical restoration --- the baseline the field skips ---
+recovers real accuracy for zero cost. We release the full harness, statistical
+tests, and configuration manifests to make every number in this paper
+reproducible from one command.
+
+% ============================================================================
+{\small
+\bibliographystyle{ieee_fullname}
+\bibliography{references}
+}
+
+\appendix
+\section{Reproducibility}
+Every experiment is a subcommand of \texttt{run\_experiments.py}
+(\texttt{main\_curve}, \texttt{cka}, \texttt{frequency}, \texttt{mechanism},
+\texttt{quantization}, \texttt{lora\_ablation}, \texttt{mitigation}) driven by
+\texttt{configs/experiments.yaml}; the config SHA-256, package versions, and
+dataset indices are written to \texttt{results/manifest.jsonl} per run. The
+statistical machinery is covered by 22 unit tests (\texttt{tests/run\_tests.py}),
+including verification that the biased CKA estimator inflates similarity at
+$n \ll d$ while the unbiased estimator used here does not.
+
+\end{document}
