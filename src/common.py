@@ -1,4 +1,10 @@
-"""Shared utilities: seeding, device selection, config loading, output paths."""
+"""Shared utilities: seeding, device selection, config loading, output paths.
+
+This module must stay importable without torch: the analysis stack
+(src.analysis, tests, CI) uses it while CI deliberately runs torch-free.
+Torch-specific behavior (RNG seeding, CUDA device selection) activates
+only when torch is installed.
+"""
 
 import hashlib
 import json
@@ -6,19 +12,32 @@ import os
 import random
 
 import numpy as np
-import torch
+
+
+def _torch():
+    """Return the torch module, or None when torch is not installed."""
+    try:
+        import torch
+        return torch
+    except ImportError:
+        return None
 
 
 def seed_everything(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed % (2**32 - 1))
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+    torch = _torch()
+    if torch is not None:
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
 
 
 def get_device() -> str:
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    torch = _torch()
+    if torch is not None and torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
 
 
 def sha256_of_file(path: str) -> str:
