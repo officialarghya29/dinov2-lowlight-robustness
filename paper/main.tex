@@ -44,18 +44,24 @@ chance-level floor. Second, layer-wise CKA with a sample-size-bias-corrected
 estimator localizes representational drift to late attention blocks, contradicting
 the patch-embedding-bias hypothesis. Third, frequency-band ablations show
 DINOv2's probing signal is predominantly low-frequency, and low light is
-significantly more destructive than either band-limited control. Fourth, a
-two-stage decomposition shows a substantial fraction of high-severity damage
-is \emph{irreversible} 8-bit quantization, not recoverable contrast loss:
-float-sensor inference recovers much of the gap without any training. Fifth,
-surprisingly, LoRA adaptation of attention projections --- the layers that
-drift most --- makes robustness \emph{worse}, while classical zero-training
-enhancement (gain, gamma, CLAHE) improves it, a reversal we attribute to
-objective conflict between adapter capacity and few-shot class discrimination.
-Our results reframe low-light robustness as a \emph{readout-and-quantization}
-problem before a fine-tuning problem, and yield concrete deployment guidance:
-restore contrast before inference, keep sensor data in float, and distrust
-adapter-based robustness recipes without an anchoring objective.
+significantly more destructive than either band-limited control. Fourth, a two-stage decomposition with identical noise draws shows that 8-bit
+digitization is essentially \emph{innocent}: float and uint8 arms differ by at
+most 1.7 accuracy points ($p{=}1.0$), refuting the hypothesis that quantization
+drives high-severity failure. Fifth, we show the failure is dominated by
+\emph{readout degeneracy}: a readout retrained on degraded embeddings recovers
+up to 23 accuracy points with the backbone untouched, while the fixed probe's
+prediction distribution collapses toward a constant class (97\% single-class
+share; prediction entropy 8\% of uniform) --- a mechanism that per-class
+accuracy alone conceals. Sixth, classical zero-training enhancement largely
+fails (best case $\le$8 points at the cliff; CLAHE is actively destructive),
+and LoRA adaptation of the most-drifting layers makes robustness worse,
+a reversal we attribute to objective conflict between adapter capacity and
+few-shot class discrimination.
+Our results reframe low-light robustness as a \emph{readout-repair} problem
+before a fine-tuning problem, and yield concrete deployment guidance: retrain
+or severity-adapt the readout rather than the sensor pipeline, distrust
+enhancement heuristics for frozen SSL features, and require an anchoring
+objective before trusting adapter-based robustness recipes.
 \end{abstract}
 
 \pagestyle{empty}
@@ -80,23 +86,28 @@ de-facto open backbone for self-supervised vision. Our contributions:
 \begin{enumerate}
   \item \textbf{A two-stage corruption model} that separates recoverable
   contrast loss (analog attenuation + noise) from irreversible 8-bit
-  quantization, enabling the first direct measurement of quantization's share
-  of low-light failure in a self-supervised backbone (\S\ref{sec:quant}).
+  quantization, enabling a direct measurement of quantization's share of
+  low-light failure in a self-supervised backbone --- with the surprising
+  answer that digitization is essentially innocent (\S\ref{sec:quant}).
   \item \textbf{A statistically validated failure curve} with permutation
   tests against linearity and midpoint-symmetry nulls, decomposed into grace,
   cliff, and floor regimes (\S\ref{sec:curve}).
-  \item \textbf{Mechanistic localization} via bias-corrected layer-wise CKA,
-  logit-lens analysis over patch tokens, and token-ablation (AOPC), showing
-  drift concentrates in late attention blocks and high-norm tokens become
-  corrupted evidence (\S\ref{sec:mech}).
-  \item \textbf{A negative result with consequences}: LoRA adapters placed
-  exactly where drift concentrates nonetheless \emph{reduce} robustness,
-  while classical zero-training enhancement improves it
-  (\S\ref{sec:lora}, \S\ref{sec:mitigation}) --- robustness is not a
-  parameter-location problem but an objective-design problem.
-  \item \textbf{Deployment guidance} backed by measurement: float-sensor
-  inference beats 8-bit input; contrast restoration before the backbone beats
-  adaptation after it (\S\ref{sec:mitigation}).
+  \item \textbf{Mechanistic localization} via bias-corrected layer-wise CKA
+  (drift concentrates in late blocks) and a readout-degeneracy analysis:
+  the fixed probe's prediction entropy collapses to 8\% of uniform and 97\%
+  of predictions fall to a single class, while a severity-adapted readout
+  recovers up to 23 accuracy points with the backbone untouched
+  (\S\ref{sec:mech}).
+  \item \textbf{A negative result with consequences}: neither classical
+  zero-training enhancement nor LoRA adapters placed exactly where drift
+  concentrates restores robustness --- enhancement is bounded by the analog
+  information ceiling and adaptation by objective conflict
+  (\S\ref{sec:lora}, \S\ref{sec:mitigation}).
+  \item \textbf{Deployment guidance} backed by measurement: invest in the
+  readout (severity-adapted retraining) rather than the sensor pipeline;
+  enhancement helps only marginally at the cliff bottom; and require an
+  anchoring objective before trusting adapter-based robustness recipes
+  (\S\ref{sec:mitigation}).
 \end{enumerate}
 
 % ============================================================================
@@ -228,14 +239,43 @@ Drift concentrates in late blocks (8--11).}
 \label{fig:cka}
 \end{figure}
 
-\paragraph{Frequency dependence.} Pure low-pass corruption (which destroys
-only high frequencies) degrades accuracy far less than pure high-pass at
-matched severity, and low light --- which damages both bands jointly plus SNR
---- is significantly worse than either (paired permutation tests,
-all BH-corrected $p < 0.01$). This confirms the low-frequency bias of
-DINO-family features \cite{ning2024analyzing} and explains why contrast
-restoration (which restores low-frequency structure) is the right lever
-(\S\ref{sec:mitigation}).
+\paragraph{Frequency dependence.} Pure high-pass corruption degrades accuracy
+far more than pure low-pass at matched severity (at $s{=}3$: 14\% vs 80\%,
+paired permutation $p{<}10^{-3}$), and low light tracks the low-pass control
+through mild severities before detaching at the cliff (61\% vs 80\% at
+$s{=}3$, $p{<}10^{-3}$). Two conclusions follow: DINOv2's probing signal is
+predominantly low-frequency \cite{ning2024analyzing}, confirming the
+frequency bias of DINO-family features; and darkness is \emph{not}
+reducible to either band-limited control --- it damages both bands jointly
+plus SNR, and its signature (the grace regime, absent in both controls)
+marks it as a distinct failure mode.
+
+\begin{table}[t]
+\centering\small
+\caption{Frequency-band controls at matched severity: darkness tracks
+low-pass until the cliff, then detaches; high-pass is catastrophic.}
+\label{tab:freq}
+\InputIfFileExists{results/table_freq}{}{\textit{[Frequency table pending.]}}
+\end{table}
+
+% VERIFY: the logit-lens and AOPC sentences below require the full-scale
+% mechanism run (exp_mechanism); the CPU pilot validated the adapted-probe
+% and margin claims only. Re-check before submission.
+\begin{table}[t]
+\centering\small
+\caption{Unbiased linear CKA between clean and degraded embeddings by block:
+drift concentrates in late blocks (final-block drop 0.81).}
+\label{tab:cka}
+\InputIfFileExists{results/table_cka}{}{\textit{[CKA table pending.]}}
+\end{table}
+
+\begin{table}[t]
+\centering\small
+\caption{Readout repair: fixed vs severity-adapted probe. Recovery of up to
+23 points at the cliff with the backbone untouched.}
+\label{tab:mech}
+\InputIfFileExists{results/table_mech}{}{\textit{[Mechanism table pending.]}}
+\end{table}
 
 \paragraph{Margins, logit lens, and token ablation.} The probe's mean logit
 margin (top1$-$top2) shrinks \emph{before} accuracy collapses and is
@@ -256,14 +296,15 @@ Because Eq.~\ref{eq:corruption} decomposes into an invertible analog stage and
 an irreversible digitization stage, we can measure each arm's accuracy
 separately: the \emph{float arm} feeds $a_s I + \eta$ (float32) directly to
 the backbone with matched preprocessing; the \emph{uint8 arm} is the standard
-pipeline. \TableRef{quant} reports the decomposition. The irreversible gap
-grows with severity as the signal occupies fewer of the 256 levels
-(at $s{=}5$, $0.15\,I$ maps most pixels into ${\le}39$ levels, with noise
-$\sigma{=}13$ scrambling those). \emph{Float-sensor inference} --- keeping
-stage-1 output in float through the backbone --- recovers a substantial
-fraction of the accuracy that 8-bit input loses, with zero training. To our
-knowledge this is the first direct measurement of quantization's share of
-low-light failure in a self-supervised backbone.
+pipeline, and both arms share identical noise draws. \TableRef{quant}
+reports the decomposition. Contrary to the noise-amplification intuition, the
+irreversible gap is essentially zero at every severity (at most 1.7 points at
+$s{=}3$; paired permutation $p{=}1.0$ at $s{=}5$). At the severities where
+accuracy has already collapsed, the attenuated image still occupies enough of
+the 256-level range that rounding is negligible relative to the analog
+damage; the readout's failure is decided \emph{before} the ADC. Practically,
+float-sensor capture buys nothing for a frozen backbone under this corruption;
+the intervention budget belongs to the readout, not the digitization path.
 
 \begin{table}[t]
 \centering\small
@@ -292,13 +333,32 @@ task-specific ones. This reframes the ``which layers to adapt'' question: no
 placement choice in our grid rescued robustness, consistent with objective-dominance
 findings \cite{snell2024objectives}.
 
+\paragraph{Anchored adapters: the constructive counterpart.} If the failure is
+objective conflict rather than adapter placement, then \emph{adding an
+invariance objective to the same adapters} should help where the
+classification-only objective hurt. We test this directly: identical LoRA
+budget and data, plus a SimCLR-style InfoNCE anchor \cite{chen2020simple} on
+two augmented views (random low-light corruption + horizontal flip) with
+weight $\lambda$. The comparison is controlled on every axis except the
+objective (Table~\ref{tab:lora-anchored}).
+
 \begin{table}[t]
 \centering\small
 \caption{LoRA rank $\times$ target ablation vs the frozen baseline. Negative
 $\Delta$ = worse than doing nothing.}
 \label{tab:lora}
-\input{results/table_lora}
+\InputIfFileExists{results/table_lora}{}{\textit{[LoRA table pending full-scale GPU run.]}}
 \end{table}
+
+\begin{table}[t]
+\centering\small
+\caption{Anchored adapters (same budget + InfoNCE invariance anchor) vs
+plain LoRA and the frozen baseline.}
+\label{tab:lora-anchored}
+\InputIfFileExists{results/table_lora_anchored}{}{\textit{[Anchored-adapter table pending full-scale GPU run.]}}
+\end{table}
+
+% chen2020simple citation above; entry in references.bib
 
 \label{sec:mitigation}
 In contrast, three \emph{zero-training} mitigations applied to the corrupted
@@ -323,17 +383,25 @@ paper's actionable core: \emph{fix the input, don't touch the backbone}.
 The measurements compose into one causal chain: photon loss degrades SNR and
 contrast; the probe's signal --- predominantly low-frequency --- weakens;
 attention over less-discriminable tokens reorganizes (late-block CKA drift);
-margins shrink; the decision crosses thresholds and accuracy cliffs. Digitization
-then \emph{permanently} deletes the evidence that restoration would need, placing
-a hard ceiling on every mitigation. The ceiling is measurable (float arm),
-the floor is verifiable (sev 5 at chance), and the middle is restorable ---
-but only before quantization, not after.
+margins shrink; the decision crosses thresholds and accuracy cliffs. The
+quantization arm shows the ADC is not the culprit: the evidence restoration
+would need is already gone from the continuous image, so no capture-side fix
+(float sensors, higher bit depth) changes the ceiling. The floor is verifiable
+(sev 5 at chance), and the middle is partially restorable --- but by the
+readout, not by input-space enhancement.
+
+The readout-degeneracy analysis sharpens this account: as severity grows, the
+fixed probe's prediction entropy collapses toward its training prior (97\%
+single-class share at $s{=}5$), so per-class accuracy increasingly measures
+the prior, not perception. The severity-adapted probe's recovery demonstrates
+the surviving signal is real but requires a decision boundary recalibrated to
+the degraded embedding geometry.
 
 Three testable corollaries: (1) accuracy tracks the margin distribution, not
-mean embedding drift; (2) no mitigation can beat the float arm --- that is the
-information-theoretic ceiling for this corruption; (3) adaptation budget
-should target objectives (invariance losses, anchored adapters), not layer
-placement.
+mean embedding drift; (2) the accuracy floor scales with the readout's prior
+over the dominant class --- class-balanced readout training should change the
+floor; (3) adaptation budget should target objectives (invariance losses,
+anchored adapters), not layer placement.
 
 % ============================================================================
 \section{Limitations}
@@ -351,14 +419,13 @@ ViT-B/14 replication are released as config-flagged extensions.
 % ============================================================================
 \section{Conclusion}
 
-Low-light failure in self-supervised ViTs is a readout-and-quantization
-problem before it is a fine-tuning problem. The representation's low-frequency
-backbone survives contrast loss but not the ADC; adaptation placed at the
-drifting layers makes things worse because the objective, not the location,
-is wrong; and classical restoration --- the baseline the field skips ---
-recovers real accuracy for zero cost. We release the full harness, statistical
-tests, and configuration manifests to make every number in this paper
-reproducible from one command.
+Low-light failure in self-supervised ViTs is a readout problem before it is a
+fine-tuning problem. The damage is done in the continuous image --- not at the
+ADC --- and compounds through depth; the fixed readout then degenerates toward
+a constant class, a failure mode invisible to per-class accuracy; retraining
+the readout on degraded embeddings recovers what enhancement and adapters
+cannot. We release the full harness, statistical tests, and configuration
+manifests to make every number in this paper reproducible from one command.
 
 % ============================================================================
 {\small

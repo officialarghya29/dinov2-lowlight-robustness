@@ -527,7 +527,18 @@ EXPERIMENTS = {
     "quantization": exp_quantization,
     "lora_ablation": exp_lora_ablation,
     "mitigation": exp_mitigation,
+    # supplementary experiments (torch-dependent; imported lazily)
+    "efficiency": lambda cfg, dev, out: _supp().exp_efficiency(cfg, dev, out),
+    "failure_analysis": lambda cfg, dev, out: _supp().exp_failure_analysis(cfg, dev, out),
+    "seed_sensitivity": lambda cfg, dev, out: _supp().exp_seed_sensitivity(cfg, dev, out),
+    "cross_dataset": lambda cfg, dev, out: _supp().exp_cross_dataset(cfg, dev, out),
 }
+
+
+def _supp():
+    """Lazy import so CI (torch-free) can still import this module."""
+    import src.supplementary as supplementary
+    return supplementary
 
 
 def main():

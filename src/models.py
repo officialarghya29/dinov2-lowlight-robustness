@@ -6,6 +6,7 @@ images, so the /255 must be applied manually there — otherwise the two arms of
 the experiment would differ by a 255x scale factor instead of by quantization.
 """
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torchvision.transforms as T

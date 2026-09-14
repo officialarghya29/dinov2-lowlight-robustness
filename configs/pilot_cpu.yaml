@@ -1,0 +1,62 @@
+# CPU pilot config: reduced scale for local validation of the full pipeline.
+# Numbers produced with this config are PILOT-SCALE (test fold n≈60) — wide CIs,
+# used to validate plumbing and fill provisional paper macros. Full-scale runs
+# use configs/experiments.yaml on GPU (Colab).
+
+data:
+  dataset: cifar10
+  n_test: 400
+  n_train: 800
+  split_seed: 42
+  test_fraction: 0.30
+
+corruption:
+  brightness_factors: [1.0, 0.75, 0.55, 0.38, 0.25, 0.15]
+  noise_std:          [0.0, 2.0, 4.0, 6.0, 9.0, 13.0]
+  lowpass_cutoffs:  [0.9, 0.7, 0.5, 0.35, 0.2]
+  highpass_cutoffs: [0.05, 0.1, 0.15, 0.2, 0.3]
+
+model:
+  backbone: dinov2_vits14
+  input_size: 224
+  imagenet_mean: [0.485, 0.456, 0.406]
+  imagenet_std:  [0.229, 0.224, 0.225]
+
+probe:
+  kind: logistic_regression
+  C: 1.0
+  max_iter: 2000
+
+stats:
+  n_bootstrap: 1000
+  ci: 95
+  n_permutations: 1000
+  alpha: 0.05
+  bonferroni: true
+
+cka:
+  unbiased: true
+
+mechanism:
+  logit_lens_topk: 16
+  aopc_fractions: [0.1, 0.2, 0.3, 0.4, 0.5]
+
+lora:
+  ranks: [4, 8, 16]
+  targets: [attn, attn_mlp]
+  alpha_multiplier: 2
+  epochs: 3
+  batch_size: 32
+  lr_lora: 5.0e-5
+  lr_head: 1.0e-3
+  weight_decay: 0.01
+  seed: 42
+  anchored:
+    enabled: true
+    lambda_anchor: 1.0
+
+mitigation:
+  gamma_base: 0.35
+  clahe_clip_limit: 0.03
+
+seed: 42

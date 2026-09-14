@@ -8,8 +8,13 @@ exact images.
 import numpy as np
 import torchvision
 
+# torchvision CIFAR-10 label order (fixed by the dataset spec)
+CIFAR10_CLASS_NAMES = ["airplane", "automobile", "bird", "cat", "deer",
+                       "dog", "frog", "horse", "ship", "truck"]
 
-def load_cifar10_subsets(n_test: int = 1000, n_train: int = 5000, seed: int = 42):
+
+def load_cifar10_subsets(n_test: int = 1000, n_train: int = 5000, seed: int = 42,
+                         return_class_names: bool = False):
     """Returns (test_images, test_labels, test_indices, train_images, train_labels, train_indices).
 
     - test pool: CIFAR-10 test split (10k), seeded choice of n_test.
@@ -36,5 +41,8 @@ def load_cifar10_subsets(n_test: int = 1000, n_train: int = 5000, seed: int = 42
         train_images.append(np.array(img))
         train_labels.append(label)
 
-    return (test_images, np.array(test_labels), test_idx,
-            train_images, np.array(train_labels), train_idx)
+    out = (test_images, np.array(test_labels), test_idx,
+           train_images, np.array(train_labels), train_idx)
+    if return_class_names:
+        out = out + (CIFAR10_CLASS_NAMES,)
+    return out

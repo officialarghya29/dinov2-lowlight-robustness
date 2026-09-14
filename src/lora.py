@@ -90,6 +90,42 @@ class BackboneClassifier(nn.Module):
         return self.head(out)
 
 
+class AnchoredBackboneClassifier(nn.Module):
+    """Backbone + head + an invariance anchor: a projection head g() whose
+    contrastive loss pulls the CLS embeddings of two augs of the SAME image
+    together and pushes different images apart (SimCLR-style, Chen et al. 2020).
+
+    This is the constructive counterpart to the negative LoRA result: the
+    failure mode identified there is objective conflict (adapters receive only
+    class-discrimination gradients). The anchor supplies the missing
+    invariance signal directly, on top of the same adapter budget.
+    """
+
+    def __init__(self, backbone, num_classes: int = 10, embed_dim: int = None,
+                 proj_dim: int = 128):
+        super().__init__()
+        self.backbone = backbone
+        self.head = nn.Linear(backbone.embed_dim, num_classes)
+        d = embed_dim or backbone.embed_dim
+        self.projector = nn.Sequential(nn.Linear(d, d), nn.ReLU(), nn.Linear(d, proj_dim))
+
+    def forward(self, x):
+        out = self.backbone(x)
+        if out.dim() == 3:
+            out = out[:, 0, :]
+        return self.head(out), self.projector(out)
+
+
+def info_nce_loss(z1: torch.Tensor, z2: torch.Tensor, temperature: float = 0.2) -> torch.Tensor:
+    """Symmetric InfoNCE between two augmented views (batch B each)."""
+    z1 = nn.functional.normalize(z1, dim=1)
+    z2 = nn.functional.normalize(z2, dim=1)
+    logits = z1 @ z2.T / temperature                       # (B, B)
+    labels = torch.arange(z1.shape[0], device=z1.device)
+    return (nn.functional.cross_entropy(logits, labels)
+            + nn.functional.cross_entropy(logits.T, labels)) / 2
+
+
 def train_lora(pretrained_model, train_images, train_labels, preprocess, cfg: dict,
                rank: int, target: str, device: str, epochs: int = None, verbose: bool = True):
     """Train a fresh LoRA adapter set + head. Returns the eval-mode classifier."""
@@ -134,6 +170,64 @@ def train_lora(pretrained_model, train_images, train_labels, preprocess, cfg: di
         if verbose:
             print(f"  [r={rank} {target}] epoch {epoch+1}/{epochs}: "
                   f"loss={running/total:.4f} acc={correct/total:.4f} ({time.time()-t0:.0f}s)")
+    clf.eval()
+    return clf
+
+
+def train_lora_anchored(pretrained_model, train_images, train_labels, preprocess, cfg: dict,
+                        rank: int, target: str, device: str, epochs: int = None,
+                        verbose: bool = True):
+    """LoRA + invariance anchor (InfoNCE over two augmented views, weight
+    lambda). Same adapter budget as train_lora; only the OBJECTIVE differs —
+    the controlled comparison the paper's Discussion promises.
+    """
+    rank = int(rank)
+    torch.manual_seed(cfg.get("seed", 42))
+    np.random.seed(cfg.get("seed", 42))
+
+    model = pretrained_model
+    apply_lora(model, rank, alpha=cfg.get("alpha_multiplier", 2) * rank, target=target)
+    clf = AnchoredBackboneClassifier(model).to(device)
+
+    head_params = list(clf.head.parameters()) + list(clf.projector.parameters())
+    head_ids = {id(p) for p in head_params}
+    lora_params = [p for n, p in clf.named_parameters()
+                   if p.requires_grad and id(p) not in head_ids]
+
+    optimizer = torch.optim.AdamW([
+        {"params": lora_params, "lr": cfg.get("lr_lora", 5e-5), "weight_decay": cfg.get("weight_decay", 0.01)},
+        {"params": head_params, "lr": cfg.get("lr_head", 1e-3), "weight_decay": cfg.get("weight_decay", 0.01)},
+    ])
+    criterion = nn.CrossEntropyLoss()
+    lam = cfg.get("anchored", {}).get("lambda_anchor", 1.0)
+
+    loader = DataLoader(LowLightAugCIFAR(train_images, train_labels, preprocess),
+                        batch_size=cfg.get("batch_size", 64), shuffle=True, num_workers=2)
+    epochs = epochs or cfg.get("epochs", 10)
+    clf.train()
+    for epoch in range(epochs):
+        running, correct, total = 0.0, 0, 0
+        for imgs, lbls in loader:
+            imgs, lbls = imgs.to(device), lbls.to(device)
+            optimizer.zero_grad()
+            logits, proj = clf(imgs)
+            ce = criterion(logits, lbls)
+            # second view: horizontal flip of the same (already randomly
+            # corrupted by the dataset) images — a cheap invariance pair
+            imgs2 = torch.flip(imgs, dims=[3])
+            feats2 = clf.backbone(imgs2)
+            if feats2.dim() == 3:
+                feats2 = feats2[:, 0, :]
+            proj2 = clf.projector(feats2)
+            loss = ce + lam * info_nce_loss(proj, proj2)
+            loss.backward()
+            optimizer.step()
+            running += ce.item() * imgs.size(0)
+            correct += logits.argmax(1).eq(lbls).sum().item()
+            total += imgs.size(0)
+        if verbose:
+            print(f"  [r={rank} {target}+anchor] epoch {epoch+1}/{epochs}: "
+                  f"ce={running/total:.4f} acc={correct/total:.4f}")
     clf.eval()
     return clf
 

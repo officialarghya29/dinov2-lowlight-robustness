@@ -1,0 +1,8 @@
+{
+  "n_perm": 1000,
+  "observed_midpoint_gap": 0.6666666666666667,
+  "observed_ssr": 0.08442857142857145,
+  "p_midpoint_asymmetric": 0.000999000999000999,
+  "p_not_linear": 0.000999000999000999,
+  "pilot_note": "PILOT SCALE: n_test=200, fold=60, n_perm=1000"
+}

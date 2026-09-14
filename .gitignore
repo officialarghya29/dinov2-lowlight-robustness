@@ -27,3 +27,6 @@ output/
 !colab_results/**/*.png
 *.pth
 *.pt
+
+# scratch logs from local runs
+*.log

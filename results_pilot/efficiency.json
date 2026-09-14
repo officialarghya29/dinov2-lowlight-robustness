@@ -1,0 +1,5 @@
+{
+  "device": "cpu",
+  "flops_G_frozen": 11.034544512,
+  "note": "latency: batch=1 median of 30 runs"
+}

@@ -35,7 +35,7 @@ import pandas as pd
 
 t_start = time.time()
 
-# --- run all 7 experiments through the paper harness ---
+# --- run all 11 experiments (7 core + 4 supplementary) through the harness ---
 # (run_experiments.py must be uploaded alongside this file, with src/ and configs/)
 subprocess.run([sys.executable, "run_experiments.py", "--experiment", "all",
                 "--outdir", "/content/results"], check=True)
@@ -129,6 +129,60 @@ try:
 except Exception as e:
     print("lora pareto plot skipped:", e)
 
+# Fig 9: failure analysis — per-class death order
+try:
+    fb = df("/content/results/failure_by_class.csv")
+    plt.figure(figsize=(8, 4.5))
+    for col, lbl in [("acc_clean", "clean"), ("acc_sev1", "sev 1"),
+                     ("acc_sev3", "sev 3"), ("acc_sev5", "sev 5")]:
+        plt.plot(fb["class"], fb[col] * 100, marker="o", label=lbl)
+    plt.xticks(rotation=30, ha="right")
+    plt.ylabel("Accuracy (%)"); plt.ylim(0, 100); plt.legend()
+    plt.title("Per-class breakdown of the low-light collapse")
+    plt.tight_layout(); plt.savefig(f"{FIGDIR}/fig9_failure_by_class.png", dpi=200); plt.close()
+except Exception as e:
+    print("failure-by-class plot skipped:", e)
+
+# Fig 10: seed / hyperparameter sensitivity (mean +/- std over 9 runs)
+try:
+    ss = df("/content/results/seed_sensitivity.csv")
+    g = ss.groupby("severity")["accuracy"]
+    plt.figure(figsize=(7, 4.5))
+    plt.errorbar(g.mean().index, g.mean() * 100, yerr=g.std() * 100,
+                 marker="o", capsize=3, color="tab:blue")
+    plt.xlabel("Low-light severity"); plt.ylabel("Accuracy (%)")
+    plt.title("Degradation across 3 seeds x 3 probe-C (mean $\\pm$ std)")
+    plt.tight_layout(); plt.savefig(f"{FIGDIR}/fig10_sensitivity.png", dpi=200); plt.close()
+except Exception as e:
+    print("sensitivity plot skipped:", e)
+
+# Fig 11: cross-dataset transfer (CIFAR-10 vs STL-10 zero-shot)
+try:
+    cd = df("/content/results/cross_dataset.csv")
+    plt.figure(figsize=(7, 4.5))
+    plt.plot(mc.severity, mc.accuracy * 100, marker="o", label="CIFAR-10 (test fold)")
+    plt.plot(cd.severity, cd.accuracy * 100, marker="s", linestyle="--",
+             label="STL-10 (zero-shot)")
+    plt.xlabel("Low-light severity"); plt.ylabel("Accuracy (%)"); plt.ylim(0, 100)
+    plt.legend(); plt.title("Cross-dataset transfer of the degradation curve")
+    plt.tight_layout(); plt.savefig(f"{FIGDIR}/fig11_cross_dataset.png", dpi=200); plt.close()
+except Exception as e:
+    print("cross-dataset plot skipped:", e)
+
+# Fig 12: efficiency (latency vs trainable params)
+try:
+    ef = df("/content/results/efficiency.csv")
+    plt.figure(figsize=(7, 4.5))
+    plt.scatter(ef.trainable_params_M, ef.latency_ms, s=90)
+    for _, r in ef.iterrows():
+        plt.annotate(r["arm"], (r.trainable_params_M, r.latency_ms),
+                     textcoords="offset points", xytext=(6, 4), fontsize=8)
+    plt.xlabel("Trainable params (M)"); plt.ylabel("Latency (ms / image, batch=1)")
+    plt.title("Adaptation cost: trainable params vs inference latency")
+    plt.tight_layout(); plt.savefig(f"{FIGDIR}/fig12_efficiency.png", dpi=200); plt.close()
+except Exception as e:
+    print("efficiency plot skipped:", e)
+
 # ============================================================================
 # LaTeX tables (auto-generated from the CSVs)
 # ============================================================================
@@ -165,6 +219,21 @@ try:
 except NameError:
     lines.append("% lora_ablation.csv missing\n")
 
+# Table 5: supplementary suite (failure, sensitivity, transfer, efficiency)
+try:
+    lines.append("\n% ---- Table 5: failure persistence + sensitivity + transfer ----\n")
+    fj = json.load(open("/content/results/failure_summary.json"))
+    lines.append(f"Failure persistence (sev1 $\\to$ max): {fj['persistence_sev1_to_max']:.2f}\\\\\n")
+    ssj = json.load(open("/content/results/seed_sensitivity_summary.json"))
+    lines.append("\\begin{tabular}{cc}\n\\toprule\n")
+    lines.append("Sev. & Sensitivity mean $\\pm$ std (\\%) \\\\\n\\midrule\n")
+    for k in sorted(ssj, key=lambda x: int(x)):
+        v = ssj[k]
+        lines.append(f"{k} & {f3(v['mean'])} $\\pm$ {f3(v['std'])} \\\\\n")
+    lines.append("\\bottomrule\\n\\end{tabular}\n")
+except Exception as e:
+    lines.append(f"% supplementary table skipped: {e}\n")
+
 with open("/content/results/paper_tables.tex", "w") as f:
     f.writelines(lines)
 
@@ -184,8 +253,21 @@ try:
 except NameError:
     pass
 summary.append("\n## Mitigation\n```\n" + mit.to_string(index=False) + "\n```")
+for extra, title in [("efficiency.csv", "Efficiency"),
+                     ("failure_summary.csv", "Failure analysis"),
+                     ("failure_by_class.csv", "Failure by class"),
+                     ("seed_sensitivity.csv", "Seed / C sensitivity"),
+                     ("cross_dataset.csv", "Cross-dataset (STL-10)")]:
+    p = f"/content/results/{extra}"
+    if os.path.exists(p):
+        summary.append(f"\n## {title}\n```\n" + df(p).to_string(index=False) + "\n```")
 with open("/content/results/RUN_SUMMARY.md", "w") as f:
     f.write("\n".join(summary))
+
+# One-click artifact bundle
+import shutil
+shutil.make_archive("/content/dinov2_lowlight_results", "zip", "/content/results")
+print("Zipped: /content/dinov2_lowlight_results.zip")
 
 print("\n" + "=" * 70)
 print("ALL DONE. Artifacts in /content/results/:")
