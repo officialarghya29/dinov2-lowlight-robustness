@@ -26,6 +26,7 @@ are released). Status legend: ✅ present · 🟡 partial/weak · ❌ missing.
 | Problem formulation + notation | ✅ | paper §3 (E_φ, severity ladder, probe f_w) |
 | Architecture diagram | 🟡 | text pipeline in §3; **TODO: one TikZ figure** |
 | Training/inference details complete | ✅ | configs/experiments.yaml is the single source of truth; SHA-256 in every manifest |
+| Deterministic corruption (order-independent noise) | ✅ | hash-keyed noise draws in `src/corruptions.py`; bit-reproducible across scripts/processes |
 | Datasets documented (splits, licensing) | ✅ | CIFAR-10 (test-fold protocol) + STL-10 transfer; both cited; indices saved in manifests |
 | Weak + strong baselines | ✅ | zero-training prototype (weak), LoRA fine-tune (strong), classical enhancement ( Gain/γ/CLAHE) |
 | Main results table with CIs | ✅ | table_main.tex — Wilson + bootstrap 95% CIs, n=1000 full scale |
@@ -80,20 +81,24 @@ are released). Status legend: ✅ present · 🟡 partial/weak · ❌ missing.
 
 ---
 
-## Gap-fix plan (what stands between the repo and a submittable paper)
+## Gap-fix plan (what remains between the repo and a submittable paper)
 
 1. **Scale.** Pilot numbers (n=120 test fold) are provisional. Run the full
    config on Colab GPU: `run_all_colab.py` → n=1000 fold, all 11 experiments,
    LoRA ablation included. ~2–3 h on a T4. Fill paper from `results/`.
 2. **LoRA ablation + anchored variant.** Colab-only (needs GPU). The
    objective-conflict claim currently rests on prior-run evidence; the
-   anchored-adapter arm (`train_lora_anchored`) is implemented and awaiting the
-   run.
-3. **Figures.** Auto-generate the 3 paper figures (curve, CKA-by-depth, Pareto)
-   from the full-scale CSVs; add the TikZ architecture diagram.
-4. **Backbone generality.** One ViT-B/14 run of `main_curve` + `cka` to show
-   the late-layer collapse is not ViT-S-specific (appendix table).
-5. **Anonymized artifact** for review (Anonymous GitHub), per §5 above.
+   anchored-adapter arm (`train_lora_anchored`, wired into
+   `exp_lora_ablation`) is implemented and awaiting the run.
+3. **Figures.** ✅ Publication PDF figures generate via
+   `make_paper_figures.py` (`paper/figures/*.pdf`, Okabe–Ito palette);
+   regenerate from full-scale CSVs after the GPU run.
+4. **Backbone generality.** ✅ DONE — ViT-B/14 replication committed
+   (`run_vitb_generality.py` → `results_pilot/vitb_*`): depth gradient
+   steepens +0.32 → +0.44; ViT-B is more robust at the cliff (36.7% vs 23.3%
+   at sev 4) yet hits the same floor. Supplementary tables + macros wired.
+5. **Anonymized artifact** for review (Anonymous GitHub) — user action
+   before submission.
 
 ## What NOT to claim (honesty guards)
 

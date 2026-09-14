@@ -166,6 +166,28 @@ def main():
         with open(f"{args.out}/table_cross.tex", "w") as f_out:
             f_out.write("\n".join(lines) + "\n")
 
+    # ---------- Table: ViT-B generality (supplementary) ----------
+    vbc = read(f"{R}/vitb_main_curve.csv")
+    if vbc:
+        lines = ["\\begin{tabular}{ccc}", "\\toprule",
+                 "Sev. & ViT-B/14 acc (\\%) & cos to clean \\\\", "\\midrule"]
+        for r in vbc:
+            lines.append(f"{r['severity']} & {pct(r['accuracy'])} & "
+                         f"{f(r['mean_cosine_to_clean'], 2)} \\\\")
+        lines += ["\\bottomrule", "\\end{tabular}"]
+        with open(f"{args.out}/table_vitb_curve.tex", "w") as f_out:
+            f_out.write("\n".join(lines) + "\n")
+    vbd = read(f"{R}/vitb_cka_by_layer.csv")
+    if vbd:
+        lines = ["\\begin{tabular}{cccc}", "\\toprule",
+                 "Block & CKA sev3 & CKA sev5 & Drop (0$\\to$5) \\\\", "\\midrule"]
+        for r in vbd:
+            lines.append(f"{r['block']} & {f(r['cka_sev3'])} & {f(r['cka_sev5'])} & "
+                         f"{f(r['drop_0_to_5'])} \\\\")
+        lines += ["\\bottomrule", "\\end{tabular}"]
+        with open(f"{args.out}/table_vitb_cka.tex", "w") as f_out:
+            f_out.write("\n".join(lines) + "\n")
+
     # ---------- Table: efficiency ----------
     ef = read(f"{R}/efficiency.csv")
     if ef:
@@ -174,7 +196,8 @@ def main():
         for r in ef:
             lat = f"{float(r['latency_ms']):.1f}" if r["latency_ms"] != "" else "--"
             acc = f"{pct(r['acc_dark_mean'])}" if r.get("acc_dark_mean") not in (None, "") else "--"
-            lines.append(f"{r['arm']} & {f(r['backbone_params_M'], 1)} & {f(r['trainable_params_M'], 2)} & "
+            arm = str(r["arm"]).replace("_", "\\_")
+            lines.append(f"{arm} & {f(r['backbone_params_M'], 1)} & {f(r['trainable_params_M'], 2)} & "
                          f"{lat} & {acc} \\\\")
         lines += ["\\bottomrule", "\\end{tabular}"]
         with open(f"{args.out}/table_eff.tex", "w") as f_out:
@@ -212,6 +235,9 @@ def main():
         if mech and len(mech) > 3:
             gap3 = 100 * (float(mech[3]["acc_adapted"]) - float(mech[3]["acc_fixed"]))
             f_out.write(f"\\newcommand{{\\AdaptedGapThree}}{{{gap3:+.1f}\\,pp}}\n")
+        if mech and len(mech) > 4:
+            gap4 = 100 * (float(mech[4]["acc_adapted"]) - float(mech[4]["acc_fixed"]))
+            f_out.write(f"\\newcommand{{\\AdaptedGapFour}}{{{gap4:+.1f}\\,pp}}\n")
         ft = read(f"{R}/frequency_tests.csv")
         if ft:
             sev3 = next((r for r in ft if int(r["severity"]) == 3), None)
@@ -230,6 +256,30 @@ def main():
             f_out.write(f"\\newcommand{{\\FrogShareFive}}{{{pct(pc[5]['top1_share'])}\\%}}\n")
             f_out.write(f"\\newcommand{{\\EntropyRatioFive}}{{{float(pc[5]['entropy_ratio_vs_uniform']):.2f}}}\n")
             f_out.write(f"\\newcommand{{\\EntropyRatioThree}}{{{float(pc[3]['entropy_ratio_vs_uniform']):.2f}}}\n")
+        if mech:
+            acc4 = next((r for r in mech if int(r["severity"]) == 4), None)
+            if acc4:
+                f_out.write(f"\\newcommand{{\\AccAdaptedFour}}{{{pct(acc4['acc_adapted'])}\\%}}\n")
+        mitr = read(f"{R}/mitigation.csv")
+        if mitr:
+            g4 = next((r for r in mitr if int(r["severity"]) == 4), None)
+            c0 = next((r for r in mitr if int(r["severity"]) == 0), None)
+            if g4:
+                f_out.write(f"\\newcommand{{\\AccGainFour}}{{{pct(g4['acc_gain'])}\\%}}\n")
+            if c0:
+                f_out.write(f"\\newcommand{{\\AccClaheClean}}{{{pct(c0['acc_clahe'])}\\%}}\n")
+        if cka and "late_minus_early" in cka:
+            f_out.write(f"\\newcommand{{\\LateMinusEarly}}{{{cka['late_minus_early']:+.2f}}}\n")
+        # backbone-generality macros (present once run_vitb_generality.py ran)
+        vb = read_json(f"{R}/vitb_cka_summary.json")
+        vbm = read(f"{R}/vitb_main_curve.csv")
+        if vb:
+            f_out.write(f"\\newcommand{{\\ViTBLateMinusEarly}}{{{vb['late_minus_early']:+.2f}}}\n")
+            f_out.write(f"\\newcommand{{\\ViTBLate}}{{{f(vb['late_mean_8_11'])}}}\n")
+            f_out.write(f"\\newcommand{{\\ViTBEarly}}{{{f(vb['early_mean_0_3'])}}}\n")
+        if vbm and len(vbm) > 5:
+            f_out.write(f"\\newcommand{{\\ViTBAccClean}}{{{pct(vbm[0]['accuracy'])}\\%}}\n")
+            f_out.write(f"\\newcommand{{\\ViTBAccFloor}}{{{pct(vbm[5]['accuracy'])}\\%}}\n")
 
     print(f"tables written to {args.out}/")
 

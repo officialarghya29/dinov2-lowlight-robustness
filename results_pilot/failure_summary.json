@@ -1,5 +1,5 @@
 {
   "failure_grid": "results_pilot/failure_grid.png",
   "flip_clean_ok_to_wrong_sev5": 100,
-  "persistence_sev1_to_max": 0.8
+  "persistence_sev1_to_max": 1.0
 }

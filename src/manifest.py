@@ -1,9 +1,11 @@
 """Reproducibility manifest: config hash, package versions, dataset indices.
 
-Every experiment call appends to results/manifests/manifest.jsonl. The paper's
-reproducibility statement cites these files.
+Every experiment call appends a line to {results_dir}/manifest.jsonl so any
+number in the paper can be traced to the exact config, code state, and
+environment that produced it.
 """
 
+import json
 import platform
 import sys
 
@@ -29,5 +31,5 @@ def write_manifest(results_dir: str, config_path: str, experiment: str, extra: d
         manifest.update(extra)
     ensure_dir(results_dir)
     with open(f"{results_dir}/manifest.jsonl", "a") as f:
-        f.write(__import__("json").dumps(manifest, sort_keys=True) + "\n")
+        f.write(json.dumps(manifest, sort_keys=True) + "\n")
     return manifest

@@ -217,7 +217,7 @@ save_csv(freq_rows, f"{OUTDIR}/frequency_tests.csv")
 save_csv(mech_rows, f"{OUTDIR}/mechanism_adapted_probes.csv")
 save_csv(quant_rows, f"{OUTDIR}/quantization.csv")
 save_csv(mit_rows, f"{OUTDIR}/mitigation.csv")
-save_json({**tests, "pilot_note": "PILOT SCALE: n_test=200, fold=60, n_perm=1000"},
+save_json({**tests, "pilot_note": f"PILOT SCALE: n_test={d['n_test']}, fold={len(idx_te)}, n_perm={st['n_permutations']}"},
           f"{OUTDIR}/main_curve_nulltests.json")
 save_json(cka_summary, f"{OUTDIR}/cka_summary.json")
 save_json({"adapted_sev3_p": t3["p_value"], "quant_sev5_p": q5["p_value"]},

@@ -450,6 +450,32 @@ def exp_lora_ablation(cfg, device, outdir):
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
+    # --- anchored-adapter arm (only the OBJECTIVE differs; controlled
+    # comparison for the objective-conflict claim). Runs at the mid-grid
+    # configuration so the delta is attributable to the loss, not capacity.
+    if lc.get("anchored", {}).get("enabled", False):
+        from src.lora import extract_backbone, train_lora_anchored
+        rank, target = lc["ranks"][len(lc["ranks"]) // 2], lc["targets"][-1]
+        print(f"  === LoRA r={rank} {target} + invariance anchor ===")
+        fresh = load_dinov2(m["backbone"], device)
+        clf = train_lora_anchored(fresh, train_images, train_labels, preprocess, lc,
+                                  rank, target, device, epochs=lc["epochs"])
+        pooled = {s: extract_backbone(clf, [low_light(im, s) for im in images],
+                                      preprocess, device) for s in range(6)}
+        probe = fit_probe(pooled[0][idx_tr], labels[idx_tr], C=p["C"], max_iter=p["max_iter"])
+        accs = [(probe.predict(pooled[s][idx_te]) == labels[idx_te]).mean() for s in range(6)]
+        n_trainable = sum(pp.numel() for pp in clf.parameters() if pp.requires_grad)
+        rows.append({"rank": rank, "target": f"{target}+anchor", "trainable_params": int(n_trainable),
+                     "acc_sev0": accs[0], "acc_sev3": accs[3], "acc_sev5": accs[5],
+                     "mean_acc": float(np.mean(accs)),
+                     "delta_vs_frozen_mean": float(np.mean(accs) - np.mean(base_accs)),
+                     "delta_vs_frozen_sev5": accs[5] - base_accs[5]})
+        print(f"  -> sev0={accs[0]:.4f} sev3={accs[3]:.4f} sev5={accs[5]:.4f} "
+              f"mean={np.mean(accs):.4f} (delta vs frozen {rows[-1]['delta_vs_frozen_mean']:+.4f})")
+        del clf
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     save_csv(rows, f"{outdir}/lora_ablation.csv")
 
     save_json([{"rank": r["rank"], "target": r["target"],

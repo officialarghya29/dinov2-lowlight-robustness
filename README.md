@@ -8,8 +8,8 @@
 ladder and localize *where inside a frozen DINOv2 ViT-S/14* accuracy dies:
 not in uint8 digitization, not fixable by classical enhancement, but in a
 **late-layer representational collapse compounded by a readout that
-degenerates to a constant class** — with a measurable, reproducible
-**grace zone** at mild darkness.
+degenerates to a constant class** — with a reproducible **grace regime**
+at mild darkness (never below clean; replicates and steepens on ViT-B/14).
 
 > **Scale note.** All numbers below are from a **real CPU pilot run**
 > (`configs/pilot_cpu.yaml`, 120-image stratified test fold, seeds fixed,
@@ -24,15 +24,15 @@ degenerates to a constant class** — with a measurable, reproducible
 
 | # | Finding | Evidence | Value (pilot) |
 |---|---|---|---|
-| F1 | **Grace bump**: mild darkness *improves* accuracy over clean | main curve, sev 0→1 | **93.3% → 96.7%** (+3.3 pp) |
-| F2 | **Cliff** between sev 3 and 4, then a **floor** far above chance | main curve | 62.5% → 22.5% (−40 pp), floor **10.8%** vs 10% chance |
-| F3 | Drift is **late-layer dominated**, not uniform | unbiased CKA per block | late blocks (8–11) drop **0.79** vs early (0–3) **0.48** |
+| F1 | **Grace regime**: mild darkness never hurts, and can help | main curve, sev 0→1; 9 seed×C configs | 93.3% → **95.0%** (+1.7 pp; ≥ clean in 9/9 configs) |
+| F2 | **Cliff** between sev 3 and 4, then a **floor** at chance | main curve | 61.7% → 23.3% (−38 pp), floor **10.8%** vs 10% chance |
+| F3 | Drift is **late-layer dominated** and **deepens with backbone size** | unbiased CKA per block; ViT-B/14 replication | ViT-S late blocks (8–11) drop **0.79** vs early **0.47**; ViT-B gap steepens +0.32 → **+0.44** |
 | F4 | Damage is **not** uint8 quantization | float vs digitized arms, same noise draw | gap ≈ **0 pp** at all severities (p = 1.0) |
 | F5 | Darkness ≠ generic frequency damage | low-pass / high-pass controls at matched severity | sev 3: dark **61.7%**, low-pass 80.0% (p=2e-4), high-pass **14.2%** (p=2e-4) |
-| F6 | At high severity the **readout collapses to one class** ("frog") | prediction-entropy + top-1 share | sev 5: **96.7%** of predictions are "frog"; entropy ratio **0.08** |
-| F7 | Retraining the readout recovers **+23 pp** at sev 4 | severity-adapted probe | 22.5% → **45.8%** |
-| F8 | Classical enhancement does **not** rescue and can *hurt* | gain / gamma / CLAHE | best (gain, sev 4): **+0.8 pp**; CLAHE at clean: **−27.5 pp** |
-| F9 | Findings are seed-robust | 3 splits × 3 probe-C | sev 5: **11.0 ± 1.6%** (n=9 runs) |
+| F6 | At high severity the **readout collapses to one class** ("frog") | prediction-entropy + top-1 share | sev 5: **99%** of predictions are "frog", only 2 classes used; entropy ratio **0.02** |
+| F7 | Retraining the readout recovers **+22.5 pp** at sev 4 | severity-adapted probe | 23.3% → **45.8%** (backbone untouched) |
+| F8 | Classical enhancement does **not** rescue and can *hurt* | gain / gamma / CLAHE | best (gain, sev 4): **+6.7 pp**; CLAHE at clean: **−27.5 pp** |
+| F9 | Findings are seed-robust | 3 splits × 3 probe-C | sev 5: **10.9 ± 1.5%**; failures at sev 1 persist **100%** to sev 5 |
 
 ---
 
@@ -60,9 +60,9 @@ or **what a practitioner can repair**. This repo answers both with controls:
 | H1 | Accuracy degrades linearly with severity | ❌ **Rejected** (p = 0.001) | grace bump + cliff shape; both null models rejected |
 | H2 | Embedding drift grows with severity and concentrates late | ✅ Supported | cos 1.00→0.16; CKA late-minus-early = **+0.31** |
 | H3 | High severity is dominated by irreversible (quantization) loss | ❌ **Rejected** | float-vs-uint8 gap ≈ 0 at every severity |
-| H4 | Part of the collapse is readout-staleness, repairable without touching the backbone | ✅ Supported | adapted probe **+23.3 pp** at sev 4 |
-| H5 | Classical photometric enhancement restores accuracy | ❌ **Rejected** | ≤ +0.8 pp at the cliff; CLAHE actively harmful |
-| H6 | The fixed readout degenerates toward a **constant class** in the dark | ✅ Supported (new) | frog share 27%→72%→97% at sev 3/4/5 |
+| H4 | Part of the collapse is readout-staleness, repairable without touching the backbone | ✅ Supported | adapted probe **+22.5 pp** at sev 4 |
+| H5 | Classical photometric enhancement restores accuracy | ❌ **Rejected** | ≤ +6.7 pp at the cliff (gain/gamma), ~0 at floor; CLAHE actively harmful |
+| H6 | The fixed readout degenerates toward a **constant class** in the dark | ✅ Supported (new) | frog share 28%→72%→99% at sev 3/4/5 |
 
 ---
 
@@ -73,11 +73,11 @@ or **what a practitioner can repair**. This repo answers both with controls:
 | Sev. | Brightness | Acc (%) | 95% CI (boot) | cos to clean | Margin (correct) | Part. ratio |
 |---:|---:|---:|---|---:|---:|---:|
 | 0 | 1.00 | **93.3** | [88.3, 97.5] | 1.00 | 6.13 | 43.4 |
-| 1 | 0.75 | **96.7** | [93.3, 99.2] | 0.94 | 6.18 | 43.6 |
-| 2 | 0.55 | 89.2 | [83.3, 94.2] | 0.80 | 5.77 | 40.4 |
-| 3 | 0.38 | 62.5 | [53.3, 71.7] | 0.59 | 4.70 | 32.8 |
-| 4 | 0.25 | 22.5 | [15.0, 30.0] | 0.31 | 3.00 | 24.0 |
-| 5 | 0.15 | 10.8 | [5.0, 16.7] | 0.16 | 3.34 | 16.3 |
+| 1 | 0.75 | **95.0** | [90.0, 98.3] | 0.94 | 6.28 | 43.6 |
+| 2 | 0.55 | 90.0 | [84.2, 95.0] | 0.80 | 5.74 | 39.3 |
+| 3 | 0.38 | 61.7 | [52.5, 70.0] | 0.60 | 4.86 | 33.2 |
+| 4 | 0.25 | 23.3 | [15.0, 30.0] | 0.31 | 2.80 | 24.6 |
+| 5 | 0.15 | 10.8 | [5.0, 16.7] | 0.16 | 3.00 | 16.5 |
 
 Both curve-shape nulls rejected (linearity p = 0.001; midpoint symmetry
 p = 0.001): the response is a **regime structure** — grace (sev ≤ 1), cliff
@@ -91,11 +91,13 @@ p = 0.001): the response is a **regime structure** — grace (sev ≤ 1), cliff
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | CKA (sev 5) | .49 | .45 | .59 | .56 | .50 | .45 | .38 | .30 | **.24** | **.23** | **.20** | **.19** |
 
-Early blocks (0–3) lose 0.48 on average; late blocks (8–11) lose **0.79**.
-The largest single drop is the **final block (0.81)** — drift *accumulates
+Early blocks (0–3) lose 0.47 on average; late blocks (8–11) lose **0.79**.
+The largest single drop is the **final block (0.82)** — drift *accumulates
 through depth*, consistent with photometric damage compounding across
 attention/MLP layers rather than being a shallow contrast-normalization
-artifact.
+artifact. The gradient **replicates and steepens on ViT-B/14** (late−early
+gap **+0.44** vs +0.32 on ViT-S; see the generality run in
+`results_pilot/vitb_*`).
 
 ![CKA](docs/figures/fig_cka.png)
 
@@ -119,10 +121,10 @@ distinct failure mode.
 | Sev. | Fixed probe (%) | Adapted probe (%) | Recovery (pp) |
 |---:|---:|---:|---:|
 | 0 | 93.3 | 93.3 | +0.0 |
-| 1 | 96.7 | 91.7 | −5.0 |
-| 2 | 89.2 | 87.5 | −1.7 |
-| 3 | 62.5 | 67.5 | +5.0 |
-| 4 | 22.5 | **45.8** | **+23.3** |
+| 1 | 95.0 | 93.3 | −1.7 |
+| 2 | 90.0 | 88.3 | −1.7 |
+| 3 | 61.7 | 69.2 | +7.5 |
+| 4 | 23.3 | **45.8** | **+22.5** |
 | 5 | 10.8 | **31.7** | **+20.8** |
 
 A probe retrained *on degraded images* recovers a fifth of the cliff at sev 4
@@ -139,10 +141,10 @@ fold; full-scale runs will tighten this.)
 | Sev. | Float stage-1 (%) | uint8 full (%) | Irreversible gap (pp) |
 |---:|---:|---:|---:|
 | 0 | 93.3 | 93.3 | 0.0 |
-| 1 | 94.2 | 94.2 | 0.0 |
-| 2 | 87.5 | 87.5 | 0.0 |
-| 3 | 65.0 | 63.3 | +1.7 |
-| 4 | 25.0 | 25.0 | 0.0 |
+| 1 | 93.3 | 95.0 | −1.7 |
+| 2 | 89.2 | 90.0 | −0.8 |
+| 3 | 61.7 | 61.7 | 0.0 |
+| 4 | 23.3 | 23.3 | 0.0 |
 | 5 | 10.8 | 10.8 | 0.0 (p = 1.0) |
 
 **H3 rejected.** The camera's uint8 digitization is essentially innocent: the
@@ -155,14 +157,15 @@ for a frozen DINOv2 under this corruption.
 | Sev. | None (%) | Gain ×a (%) | Gamma (%) | CLAHE (%) |
 |---:|---:|---:|---:|---:|
 | 0 | 93.3 | 93.3 | 92.5 | **65.8** |
-| 1 | 94.2 | 94.2 | 92.5 | 53.3 |
-| 2 | 92.5 | 91.7 | 89.2 | 35.0 |
-| 3 | 64.2 | 65.8 | 62.5 | 19.2 |
-| 4 | 20.8 | **29.2** | 16.7 | 8.3 |
-| 5 | 10.0 | 10.8 | 10.8 | 10.0 |
+| 1 | 95.0 | 94.2 | 92.5 | 53.3 |
+| 2 | 90.0 | 89.2 | 86.7 | 31.7 |
+| 3 | 61.7 | **68.3** | **68.3** | 21.7 |
+| 4 | 23.3 | **30.0** | 19.2 | 11.7 |
+| 5 | 10.8 | 11.7 | 11.7 | 10.0 |
 
-**H5 rejected.** The best classical intervention (global gain) buys ≤ +8.4 pp
-and only at the cliff bottom; CLAHE — the standard low-light heuristic —
+**H5 rejected as a fix.** The best classical interventions (gain, gamma) buy
++6.7 pp at the cliff and vanish at the floor; CLAHE — the standard low-light
+heuristic —
 *destroys* up to 27.5 pp even on clean images, because it redistributes
 spectral energy the frozen features depend on. Enhancement fixes how images
 *look* to humans, not how they land in DINOv2's embedding geometry.
@@ -173,14 +176,14 @@ spectral energy the frozen features depend on. Enhancement fixes how images
 
 | Class | Clean (%) | Sev 1 (%) | Sev 3 (%) | Sev 5 (%) | First sev < 50% |
 |---|---:|---:|---:|---:|---:|
-| airplane | 92 | 100 | 77 | 8 | 4 |
+| airplane | 92 | 92 | 85 | 8 | 4 |
 | automobile | 100 | 100 | 33 | 0 | 3 |
-| bird | 100 | 100 | 56 | 0 | 4 |
+| bird | 100 | 89 | 56 | 0 | 4 |
 | cat | 83 | 92 | 42 | 0 | 3 |
-| deer | 91 | 100 | 64 | 0 | 4 |
-| dog | 85 | 85 | 46 | 0 | 3 |
-| **frog** | 92 | 92 | 92 | **100** | **never** |
-| horse | 93 | 93 | 73 | 0 | 4 |
+| deer | 91 | 100 | 73 | 0 | 4 |
+| dog | 85 | 85 | 38 | 0 | 3 |
+| **frog** | 92 | 100 | 92 | **100** | **never** |
+| horse | 93 | 93 | 80 | 0 | 4 |
 | ship | 100 | 100 | 62 | 0 | 4 |
 | truck | 100 | 100 | 46 | 0 | 3 |
 
@@ -188,27 +191,27 @@ Frog's "100%" is **not** perception — it is an artifact of readout collapse:
 
 | Sev. | Top-1 predicted class | Top-1 share | Classes used | Entropy / ln 10 |
 |---:|---|---:|---:|---:|
-| 0 | (balanced) | 0.13 | 10 | 1.00 |
-| 1 | (balanced) | 0.14 | 10 | 0.99 |
-| 2 | (balanced) | 0.12 | 10 | 0.99 |
-| 3 | frog | 0.27 | 10 | 0.91 |
+| 0 | horse | 0.12 | 10 | 0.99 |
+| 1 | horse | 0.12 | 10 | 0.99 |
+| 2 | ship | 0.12 | 10 | 0.99 |
+| 3 | frog | 0.28 | 10 | 0.91 |
 | 4 | frog | 0.72 | 10 | 0.50 |
-| 5 | **frog** | **0.97** | 4 | **0.08** |
+| 5 | **frog** | **0.99** | **2** | **0.02** |
 
 As darkness deepens, the fixed probe's output distribution collapses from
-near-uniform (entropy ratio 1.00) to **near-constant "frog"** (0.08) — the
+near-uniform (entropy ratio 0.99) to **near-constant "frog"** (0.02) — the
 readout falls back to its training prior. Per-class accuracy alone would have
 celebrated frog; the prediction-distribution analysis exposes the mechanism.
-Failure persistence is high: **80%** of images misclassified at sev 1 are
+Failure persistence is total: **100%** of images misclassified at sev 1 are
 still misclassified at sev 5.
 
 ### Table 8 — Seed / hyperparameter sensitivity (3 splits × 3 probe-C, n=9 per cell)
 
 | Sev. | 0 | 1 | 2 | 3 | 4 | 5 |
 |---|---:|---:|---:|---:|---:|---:|
-| Acc (%) | 92.2 ± 1.3 | 94.0 ± 1.3 | 90.3 ± 2.5 | 65.4 ± 5.2 | 25.3 ± 5.6 | 11.0 ± 1.6 |
+| Acc (%) | 92.2 ± 1.3 | 93.6 ± 1.1 | 89.4 ± 3.1 | 67.3 ± 7.1 | 27.2 ± 5.0 | 10.9 ± 1.5 |
 
-The grace bump, the cliff, and the floor are all reproduced across every
+The grace regime (never below clean), the cliff, and the floor reproduce across every
 split and every probe regularization: the regime structure is a property of
 the backbone–corruption interaction, not of one lucky draw.
 
@@ -218,12 +221,12 @@ the backbone–corruption interaction, not of one lucky draw.
 
 | Arm | Backbone (M) | Trainable (M) | Latency (ms/img) | Throughput (img/s) |
 |---|---:|---:|---:|---:|
-| Frozen | 22.1 | 0.00 | **42.8** | 23.4 |
-| + LoRA r4 (attn_mlp) | 22.4 | 0.29 | 56.9 | 17.6 |
-| + LoRA r8 (attn_mlp) | 22.6 | 0.59 | 50.6 | 19.8 |
+| Frozen | 22.1 | 0.00 | **40.6** | 24.6 |
+| + LoRA r4 (attn_mlp) | 22.4 | 0.29 | 49.0 | 20.4 |
+| + LoRA r8 (attn_mlp) | 22.6 | 0.59 | 50.9 | 19.6 |
 | + LoRA r16 (attn_mlp) | 23.2 | 1.18 | 50.7 | 19.7 |
 
-Adapters cost 18–33% latency for ≤ 1.2M trainable parameters (5.3% of the
+Adapters cost 21–25% latency for ≤ 1.2M trainable parameters (5.3% of the
 backbone) — the efficiency axis of the LoRA Pareto analysis that the full GPU
 run completes with accuracy columns.
 
@@ -236,17 +239,16 @@ The six regimes form one causal chain, each link measured above:
 ```
 photon starvation (continuous-tone loss)          [Table 5: uint8 innocent]
         ↓
-embedding drift, compounding with depth           [Table 2: late CKA 0.19]
-        ↓   (grace zone: mild darkness acts as
-        ↓    regularizing contrast reduction)      [Table 1: +3.3 pp bump]
+embedding drift, compounding with depth           [Table 2: late CKA 0.19; ViT-B +0.44]
+        ↓   (grace regime: mild darkness never hurts)   [Table 1: +1.7 pp]
         ↓
 spectral distinctness from blur/noise breaks down [Table 3: dissociation]
         ↓
 decision margins shrink → argmax degenerates
-to the training prior (constant class)            [Table 7: entropy 0.08]
+to the training prior (constant class)            [Table 7: entropy 0.02]
         ↓
 floor at ~chance even though features retain
-signal a retrained readout can exploit            [Table 4: +23 pp]
+signal a retrained readout can exploit            [Table 4: +22.5 pp]
 ```
 
 Three corollaries, each falsifiable with this repo's harness:
@@ -288,9 +290,11 @@ SHA-256, subset indices, environment) via `src/manifest.py`.
 ├── run_experiments.py         # 11-experiment harness (GPU; one CLI)
 ├── run_pilot_cpu.py           # CPU pilot driver (what produced the numbers above)
 ├── run_collapse_analysis.py   # prediction-collapse quantification (F6)
+├── run_vitb_generality.py     # ViT-B/14 replication of curve + CKA gradient
 ├── run_all_colab.py           # one-shot Colab GPU runner: all experiments + figures + zip
 ├── make_paper_tables.py       # CSV → LaTeX tables + macros (paper/results/)
-├── make_readme_figures.py     # CSV → README/paper PNG figures (docs/figures/)
+├── make_paper_figures.py      # CSV → publication PDF/PNG figures (paper/figures/)
+├── make_readme_figures.py     # CSV → README figures (docs/figures/)
 ├── configs/
 │   ├── experiments.yaml       # full-scale single source of truth
 │   └── pilot_cpu.yaml         # pilot scale (this README's numbers)
@@ -353,12 +357,27 @@ python3 run_experiments.py --experiment main_curve     # or cka | frequency | me
   pipeline refuses to silently mix scales (`make_paper_tables.py` stamps a
   scale note into `numbers.tex`).
 
+## Compiling the paper
+
+The CVPR-style paper lives in [`paper/`](paper/) with **vendored official
+style files** (`cvpr.sty`, `ieeenat_fullname.bst` from
+[cvpr-org/author-kit](https://github.com/cvpr-org/author-kit)) and builds
+with one command:
+
+```bash
+cd paper && make        # or: pdflatex main && bibtex main && pdflatex main ×2
+```
+
+Both `main.pdf` (8 pages) and `supl.pdf` build warning-free from committed
+tables/figures; on Overleaf, upload the `paper/` folder as-is. All tables and
+macros are regenerated from `results_pilot/` by `make_paper_tables.py`.
+
 ## Roadmap to submission
 
 See [`paper/CVPR2027_CHECKLIST.md`](paper/CVPR2027_CHECKLIST.md) for the
-item-by-item audit. Highest-value next runs: (1) full-scale Colab suite,
-(2) LoRA + anchored-adapter ablation, (3) ViT-B/14 replication of the CKA
-depth gradient, (4) STL-10 transfer arm.
+item-by-item audit. Highest-value next runs: (1) full-scale Colab suite
+(LoRA + anchored-adapter ablation, STL-10 transfer), (2) real-darkness
+validation (ExDark), (3) class-balanced readout test of corollary 2.
 
 ## License
 

@@ -11,10 +11,29 @@ Several experiments depend on separating the two, so every function here is
 explicit about which stage it applies.
 """
 
+import hashlib
+
 import numpy as np
 
 BRIGHTNESS_FACTORS = [1.0, 0.75, 0.55, 0.38, 0.25, 0.15]
 NOISE_STD = [0.0, 2.0, 4.0, 6.0, 9.0, 13.0]
+
+
+def _deterministic_noise(image: np.ndarray, severity: int, sigma: float) -> np.ndarray:
+    """Order-independent Gaussian noise keyed on (image bytes, severity).
+
+    Why not np.random.global? Because the noise draw then depends on HOW MANY
+    corruptions happened before this one in the process, so two scripts that
+    evaluate the same (image, severity) pair with different call orders get
+    different images -- and 'same seed, same result' silently breaks. This
+    generator derives a reproducible stream from the image content itself:
+    identical inputs give identical noise regardless of call order, and no
+    global RNG state is consumed or mutated.
+    """
+    key = hashlib.blake2b(image.tobytes() + bytes([severity]), digest_size=16)
+    seed = int.from_bytes(key.digest(), "little") % (2**32)
+    rng = np.random.RandomState(seed)
+    return rng.normal(0.0, sigma, image.shape).astype(np.float32)
 
 
 def low_light_stage1(image: np.ndarray, severity: int,
@@ -29,11 +48,10 @@ def low_light_stage1(image: np.ndarray, severity: int,
     noise_std = noise_std or NOISE_STD
     img = image.astype(np.float32) * factors[severity]
     if noise_std[severity] > 0:
-        # cast noise to float32: normal() returns float64, and float32 + float64
-        # silently promotes the whole pipeline to float64, which would make the
-        # 'float stage-1' arm of the quantization experiment differ from the uint8
-        # arm by dtype scaling inside downstream preprocessors.
-        img = img + np.random.normal(0, noise_std[severity], img.shape).astype(np.float32)
+        # float32 noise: normal() returns float64, and float32 + float64 would
+        # silently promote the pipeline to float64 (see quantization experiment).
+        # Noise is order-independent: same (image, severity) -> same draw.
+        img = img + _deterministic_noise(image, severity, noise_std[severity])
     return np.clip(img, 0, 255).astype(np.float32)
 
 

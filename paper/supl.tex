@@ -1,0 +1,166 @@
+% ============================================================================
+% Supplementary material: "When Vision Goes Dark"
+% Compile independently: pdflatex supl.tex (uses the same style files).
+% All tables auto-generated from ../results_pilot/ — do not edit.
+% ============================================================================
+\documentclass[10pt,twocolumn,letterpaper]{article}
+
+\usepackage[review]{cvpr}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage[pagebackref,breaklinks,colorlinks]{hyperref}
+
+\def\paperID{*}
+\def\confName{CVPR}
+\def\confYear{2027}
+
+\newcommand{\TableRef}[1]{Table~\ref{tab:#1}}
+\input{results/numbers}
+
+\title{Supplementary Material:\\ When Vision Goes Dark}
+
+\author{Anonymous submission}
+
+\begin{document}
+\maketitle
+\pagestyle{empty}
+
+% ---------------------------------------------------------------------------
+\section{Backbone Generality: ViT-B/14}
+\label{sup:vitb}
+
+The main paper reports the late-layer CKA collapse on ViT-S/14 and cites the
+ViT-B/14 replication. Here are the full numbers. Two observations go beyond
+the summary in the main text. First, ViT-B/14 is \emph{more robust at the
+cliff} --- 36.7\% at severity 4 against ViT-S's 23.3\% --- yet lands at the
+identical floor (10.8\% at severity 5): backbone capacity buys mid-ladder
+robustness, not floor escape. Second, ViT-B's grace regime is flat rather
+than bumped (98.3\% at both severities 0 and 1), so the bump is not a
+universal property of the family but depends on capacity or scale --- a
+distinction the full-scale run can settle.
+
+\TableRef{vitb-curve} gives the ViT-B/14 response curve;
+\TableRef{vitb-cka} the per-block CKA. The late-minus-early drop gradient
+steepens from $+0.32$ (ViT-S) to $+0.44$ (ViT-B), and the largest single
+drop moves to a later block, consistent with the depth-compounding account.
+
+\begin{table}[h]
+\centering\small
+\caption{ViT-B/14 main curve (pilot scale): accuracy and embedding drift.}
+\label{tab:vitb-curve}
+\input{results/table_vitb_curve}
+\end{table}
+
+\begin{table}[h]
+\centering\small
+\caption{ViT-B/14 layer-wise CKA to clean (test fold).}
+\label{tab:vitb-cka}
+\input{results/table_vitb_cka}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_cka_depth.pdf}
+\caption{CKA to clean by block: ViT-S/14 (solid) vs.\ ViT-B/14 (dashed,
+severity 5). The drift gradient deepens with backbone size.}
+\end{figure}
+
+% ---------------------------------------------------------------------------
+\section{Seed and Regularization Sensitivity}
+\label{sup:sens}
+
+The main curve regenerates across three split seeds ($\{42, 43, 44\}$)
+crossed with three logistic-probe regularization strengths
+($C \in \{0.1, 1, 10\}$) --- nine full re-runs of the ladder per severity.
+\TableRef{sens} reports mean $\pm$ standard deviation. The regime structure
+(never-negative grace, cliff, chance-level floor) is present in every
+configuration; the cliff's exact position varies by at most one severity
+step.
+
+\begin{table}[h]
+\centering\small
+\caption{Accuracy (\%) across 3 split seeds $\times$ 3 probe-C values.}
+\label{tab:sens}
+\input{results/table_sensitivity}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Failure Analysis Detail}
+\label{sup:failure}
+
+\paragraph{Per-class death order.} \TableRef{failure} gives per-class
+accuracy at severities 0/1/3/5. Automobile, cat, dog, and truck cross the
+50\% line at severity 3; airplane, bird, deer, horse, and ship hold until
+severity 4. Frog never crosses it --- the constant-class artifact analyzed in
+the main text (\S6.4 there). Note also that the classes dying early
+(automobile, truck) are exactly those whose clean embeddings sit closest to
+their dark-counterpart embeddings in cosine terms, suggesting embedding
+proximity, not semantic difficulty, governs the death order; we flag this as
+an observation for the full-scale run to test, not a claim.
+
+\begin{table}[h]
+\centering\small
+\caption{Per-class accuracy (\%) across the ladder.}
+\label{tab:failure}
+\input{results/table_failure}
+\end{table}
+
+\paragraph{Persistence.} Every image misclassified at severity 1 remains
+misclassified at severity 5 (100/100 on the pilot fold). A hundred
+clean-correct images flip by severity 5.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/failure_grid.png}
+\caption{Clean-correct images misclassified at severity 5 (title shows the
+dark prediction). Most dark predictions are ``frog'' --- the readout
+collapse of the main text.}
+\end{figure}
+
+% ---------------------------------------------------------------------------
+\section{Efficiency}
+\label{sup:eff}
+
+Latency measured on CPU (batch 1) with interleaved rounds to cancel
+machine-contention drift: 4 rounds $\times$ 25 iterations per arm, median
+per arm. Adapters add 21--25\% latency for at most 1.18M trainable
+parameters.
+
+\begin{table}[h]
+\centering\small
+\caption{Latency and throughput by arm.}
+\label{tab:eff}
+\input{results/table_eff}
+\end{table}
+
+% ---------------------------------------------------------------------------
+\section{Prediction-Distribution Statistics}
+\label{sup:collapse}
+
+Per-severity statistics of the fixed probe's output distribution
+(\TableRef{collapse}): top-1 predicted class and its share, number of
+classes ever predicted, and Shannon entropy of the prediction distribution
+normalized by $\ln 10$ (uniform $= 1.0$). The collapse to a constant class
+at severity 5 (entropy 0.02, two classes used) is the mechanism behind
+frog's spuriously perfect per-class accuracy.
+
+\begin{table}[h]
+\centering\small
+\caption{Prediction-distribution statistics of the fixed probe by severity.}
+\label{tab:collapse}
+\begin{tabular}{cclcc}
+\toprule
+$s$ & top-1 class & share & classes used & $H/\ln 10$ \\
+\midrule
+0 & horse  & 0.12 & 10 & 0.99 \\
+1 & horse  & 0.12 & 10 & 0.99 \\
+2 & ship   & 0.12 & 10 & 0.99 \\
+3 & frog   & 0.28 & 10 & 0.91 \\
+4 & frog   & 0.72 & 10 & 0.50 \\
+5 & frog   & 0.99 & 2  & 0.02 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}

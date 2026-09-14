@@ -80,19 +80,6 @@ def _curve_midpoint_gap(acc: np.ndarray) -> float:
     return float(abs(acc[2] - acc[4]))
 
 
-def _permute_curve(acc: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """Permutation scheme: resample each severity's correctness vector.
-
-    Each severity's test correctness vector is shuffled in place — preserves
-    the per-severity Bernoulli structure while breaking any relationship
-    between severities. Exact under the null that severities are exchangeable.
-    """
-    out = np.empty_like(acc)
-    for j in range(len(acc)):
-        out[j] = rng.permutation(acc[j]).mean() if isinstance(acc[j], np.ndarray) else acc[j]
-    return out
-
-
 def curve_permutation_test(correctness_by_severity, n_perm: int = 5000, seed: int = 42) -> dict:
     """Parametric-bootstrap null tests for the severity curve.
 
@@ -121,7 +108,7 @@ def curve_permutation_test(correctness_by_severity, n_perm: int = 5000, seed: in
 
     null_ssr = np.empty(n_perm)
     for i in range(n_perm):
-        sim = np.stack([(rng.random(n) < p_lens_s) for p_lens_s in p_lin]).astype(float)
+        sim = np.stack([(rng.random(n) < p) for p in p_lin]).astype(float)
         null_ssr[i] = _curve_ssr(sim.mean(axis=1))
 
     p_pool = (corr[2].sum() + corr[4].sum()) / (2 * n)
