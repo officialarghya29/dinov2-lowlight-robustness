@@ -58,7 +58,7 @@ or **what a practitioner can repair**. This repo answers both with controls:
 | ID | Hypothesis | Status | Key evidence |
 |---|---|---|---|
 | H1 | Accuracy degrades linearly with severity | ❌ **Rejected** (p = 0.001) | grace bump + cliff shape; both null models rejected |
-| H2 | Embedding drift grows with severity and concentrates late | ✅ Supported | cos 1.00→0.16; CKA late-minus-early = **+0.31** |
+| H2 | Embedding drift grows with severity and concentrates late | ✅ Supported | cos 1.00→0.16; CKA late-minus-early = **+0.32** (ViT-B: **+0.44**) |
 | H3 | High severity is dominated by irreversible (quantization) loss | ❌ **Rejected** | float-vs-uint8 gap ≈ 0 at every severity |
 | H4 | Part of the collapse is readout-staleness, repairable without touching the backbone | ✅ Supported | adapted probe **+22.5 pp** at sev 4 |
 | H5 | Classical photometric enhancement restores accuracy | ❌ **Rejected** | ≤ +6.7 pp at the cliff (gain/gamma), ~0 at floor; CLAHE actively harmful |
@@ -127,7 +127,7 @@ distinct failure mode.
 | 4 | 23.3 | **45.8** | **+22.5** |
 | 5 | 10.8 | **31.7** | **+20.8** |
 
-A probe retrained *on degraded images* recovers a fifth of the cliff at sev 4
+A probe retrained *on degraded images* recovers nearly a third of the cliff at sev 4
 with **zero backbone adaptation**. Representation damage is real (adapted
 probe still 47 pp below clean) but a large, actionable share of end-task loss
 is **stale readout**, not destroyed features. (Small negative recovery at sev
