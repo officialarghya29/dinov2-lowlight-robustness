@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+message: "If you use this harness or the findings, please cite both the software and the paper."
+title: "dinov2-lowlight-robustness: A Mechanistic Decomposition of Low-Light Failure in Self-Supervised Vision Transformers"
+authors:
+  - given-names: Arghya
+    family-names: Biswas
+    email: officialarghya29@gmail.com
+version: 0.3.0
+date-released: "2026-09-15"
+license: MIT
+repository-code: "https://github.com/officialarghya29/dinov2-lowlight-robustness"
+keywords:
+  - self-supervised learning
+  - DINOv2
+  - vision transformers
+  - robustness
+  - low-light
+  - mechanistic interpretability
+  - CKA
+abstract: >-
+  A controlled study localizing where a frozen DINOv2 ViT fails under a
+  physically motivated low-light ladder: the ADC is innocent, drift compounds
+  through depth (replicating and steepening on ViT-B/14), the fixed readout
+  collapses to a constant class set by embedding geometry rather than the
+  training prior, and readout-side repair beats every input-space
+  enhancement and sensor-side fix. Full harness, statistical machinery with
+  unit tests, and committed artifacts for every number.
+preferred-citation:
+  type: article
+  title: "When Vision Goes Dark: A Mechanistic Decomposition of Low-Light Failure in Self-Supervised Vision Transformers"
+  authors:
+    - given-names: Arghya
+      family-names: Biswas
+  year: 2026
+  notes: "Under preparation for CVPR 2027 (submission window Nov 2026)."

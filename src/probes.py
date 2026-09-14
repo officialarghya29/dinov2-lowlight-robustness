@@ -10,8 +10,12 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 
 
-def fit_probe(X: np.ndarray, y: np.ndarray, C: float = 1.0, max_iter: int = 2000) -> LogisticRegression:
-    probe = LogisticRegression(max_iter=max_iter, C=C)
+def fit_probe(X: np.ndarray, y: np.ndarray, C: float = 1.0, max_iter: int = 2000,
+              class_weight=None) -> LogisticRegression:
+    """Linear readout. class_weight='balanced' reweights classes inversely to
+    their training frequency, removing prior dominance (used by the
+    class-balanced floor test, corollary 2 of the paper)."""
+    probe = LogisticRegression(max_iter=max_iter, C=C, class_weight=class_weight)
     probe.fit(X, y)
     return probe
 

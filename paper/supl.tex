@@ -135,6 +135,36 @@ parameters.
 \end{table}
 
 % ---------------------------------------------------------------------------
+\section{Corollary Tests: Prior vs.\ Geometry, Readout vs.\ Enhancement}
+\label{sup:corr}
+
+The main text reports that the constant-class collapse survives a five-fold
+oversampling of a non-frog class (geometry attractor, not prior replay) and
+that readout-side repair beats the best input-space enhancement. This
+section gives the full statistics (\TableRef{corr}).
+
+\begin{table}[h]
+\centering\small
+\caption{Floor statistics of the fixed probe at severity 5 under three
+training-prior conditions (identical test fold and backbone). The collapse
+target does not follow the prior.}
+\label{tab:corr}
+\begin{tabular}{lccc}
+\toprule
+Training prior & Top-1 class & Share & $H/\ln 10$ \\
+\midrule
+near-uniform (default) & frog & 0.99 & 0.02 \\
+class-balanced weights & frog & 0.99 & 0.02 \\
+cat oversampled $\times$5 & frog & 0.99 & 0.02 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Readout repair vs.\ the best input-space enhancement (linear gain), paired
+permutation test on the same fold: $+15.8$ points at $s{=}4$
+($p{=}0.007$), $+20.0$ points at $s{=}5$ ($p{<}10^{-3}$).
+
+% ---------------------------------------------------------------------------
 \section{Prediction-Distribution Statistics}
 \label{sup:collapse}
 

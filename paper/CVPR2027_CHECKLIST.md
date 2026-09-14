@@ -17,7 +17,7 @@ are released). Status legend: ✅ present · 🟡 partial/weak · ❌ missing.
 | Why the problem matters | ✅ | §1: deployment of SSL backbones in adverse illumination is unstudied at representation level |
 | Research gap in one sentence | ✅ | "Corruption robustness work measures *models*; nobody has localized *where inside a frozen SSL backbone* photometric failure arises, nor what a readout can and cannot repair." |
 | Hypothesis chain (H1–H5) with outcomes | ✅ | paper §5 + README claims registry (H1 rejected — that is a *finding*, not a failure) |
-| Novelty beyond A+B | ✅ | mechanistic localization (layer-wise CKA gradient) + readout-repair decomposition + quantization-bound irreversibility test; no prior DINOv2 low-light work does this |
+| Novelty beyond A+B | ✅ | mechanistic localization (layer-wise CKA gradient) + readout-repair decomposition + quantization null + geometry-attractor discovery (collapse target is prior-independent — refuted our own corollary with a discriminating test); no prior DINOv2 low-light work does this |
 
 ## 2. Method & experiments
 

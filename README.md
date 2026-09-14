@@ -33,6 +33,8 @@ at mild darkness (never below clean; replicates and steepens on ViT-B/14).
 | F7 | Retraining the readout recovers **+22.5 pp** at sev 4 | severity-adapted probe | 23.3% → **45.8%** (backbone untouched) |
 | F8 | Classical enhancement does **not** rescue and can *hurt* | gain / gamma / CLAHE | best (gain, sev 4): **+6.7 pp**; CLAHE at clean: **−27.5 pp** |
 | F9 | Findings are seed-robust | 3 splits × 3 probe-C | sev 5: **10.9 ± 1.5%**; failures at sev 1 persist **100%** to sev 5 |
+| F10 | The frog collapse is a **geometry attractor**, not prior replay | 5× cat-oversampled prior, same fold | sev-5 collapse stays frog @ 99% even when the prior's top class is cat |
+| F11 | **Readout repair beats input-space enhancement** (corollary confirmed) | adapted probe vs best enhancement, paired test | **+15.8 pp** at sev 4 (p=0.007), **+20.0 pp** at sev 5 (p=4e-4) |
 
 ---
 
@@ -274,6 +276,7 @@ Three corollaries, each falsifiable with this repo's harness:
 | Quantization innocence | exp 5 | `results_pilot/quantization.csv` |
 | Enhancement failure | exp 7 | `results_pilot/mitigation.csv` |
 | Frog collapse | `run_collapse_analysis.py` | `results_pilot/prediction_collapse.csv` |
+| Geometry-attractor test (F10) + readout-vs-enhancement (F11) | `run_corollaries.py` | `results_pilot/corollaries.json`, `corollary2_floor_stats.csv` |
 | Failure persistence | `src/supplementary.py` | `results_pilot/failure_summary.csv`, `failure_by_class.csv` |
 | Seed robustness | `src/supplementary.py` | `results_pilot/seed_sensitivity.csv` |
 | Efficiency | `src/supplementary.py` | `results_pilot/efficiency.csv` |
@@ -377,8 +380,18 @@ macros are regenerated from `results_pilot/` by `make_paper_tables.py`.
 See [`paper/CVPR2027_CHECKLIST.md`](paper/CVPR2027_CHECKLIST.md) for the
 item-by-item audit. Highest-value next runs: (1) full-scale Colab suite
 (LoRA + anchored-adapter ablation, STL-10 transfer), (2) real-darkness
-validation (ExDark), (3) class-balanced readout test of corollary 2.
+validation (ExDark), (3) predicting the geometry attractor from embedding
+distances alone (the revised corollary 2).
 
 ## License
 
 TBD by repository owner (suggest MIT for code; figures/tables CC-BY-4.0).
+
+## Citation
+
+If you use this harness or build on the findings, please cite
+[`CITATION.cff`](CITATION.cff) (software) and the paper:
+
+> A. Biswas. *When Vision Goes Dark: A Mechanistic Decomposition of Low-Light
+> Failure in Self-Supervised Vision Transformers.* Under preparation for
+> CVPR 2027.

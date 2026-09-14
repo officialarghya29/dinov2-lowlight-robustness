@@ -373,10 +373,12 @@ share 12\%, entropy 99\% of uniform), tips toward \emph{frog} at severity 3
 (share 28\%, entropy 91\%), and collapses at severity 5 to a \emph{constant
 prediction} --- \FrogShareFive{} of test images are labeled frog, the
 distribution uses two of ten classes, and entropy falls to
-\EntropyRatioFive{} of uniform. The probe is no longer reading the image; it
-is replaying its training prior. Frog's ``100\%'' is the prior falling on
-frog. Any evaluation that reports only per-class accuracy --- which is all of
-them, as far as we know --- would score this total collapse as one class
+\EntropyRatioFive{} of uniform. The probe is no longer reading the image.
+Frog's ``100\%'' is a collapse artifact. But is it the readout falling back
+on its \emph{training prior}? A control experiment below shows the truth is
+stranger --- the collapse target is set by the embedding geometry, not the
+prior. Any evaluation that reports only per-class accuracy --- which is all
+of them, as far as we know --- would score this total collapse as one class
 getting \emph{better}.
 
 \begin{figure}[t]
@@ -532,6 +534,22 @@ same floor (\ViTBAccFloor{} at $s{=}5$), with the late-minus-early CKA gap at
 (\ViTBLate{} vs.\ \ViTBEarly{} on ViT-B against \LateDrift{} vs.\
 \EarlyDrift{} on ViT-S). The mechanism is not a ViT-S artifact.
 
+\paragraph{Prior vs.\ geometry: a discriminating test.} The natural reading
+of the constant-class collapse is that the readout replays its training
+prior. We tested this directly with two interventions on the readout's
+training distribution, holding the backbone and test fold fixed.
+Class-balanced reweighting is a no-op on our near-uniform fold (collapse
+unchanged: frog, 99\%). So we made the prior genuinely non-uniform:
+oversampling a single non-frog class (cat) five-fold, so the training
+prior's dominant class is unambiguous. If the collapse replayed the prior,
+the darkest fold should now predict ``cat.'' It does not: the sev-5 collapse
+remains \emph{frog} at the same 99\% share and the same 0.02 entropy. The
+constant class is not chosen by the readout's prior at all --- in the dark
+embedding geometry, images of \emph{every} class land nearest the frog
+prototype. The collapse target is a property of the degraded representation,
+which also explains why it is invisible to any intervention on the readout's
+training distribution.
+
 \paragraph{Compute cost.} Frozen ViT-S/14 runs at 40.6\,ms per image on CPU
 (batch 1; interleaved-round medians, Appendix~\ref{app:eff}); the LoRA arms
 add 21--25\% latency for at
@@ -555,15 +573,22 @@ contributes nothing. The information a retrained readout needs is still in
 the embeddings --- 22.5 points of it at severity 4 --- which is what makes
 this a readout problem and not a representation-annihilation problem.
 
-Three corollaries, each falsifiable with the released harness. First, the
-accuracy floor should scale with the readout's prior over its dominant class:
-retrain the probe with a class-balanced objective and the floor's class
-identity should move even if its height does not. Second, severity-matched
-augmentation of the readout's training fold should recover most of what the
-adapted probe recovers, without ever seeing test-time corruptions at training
-time. Third, any intervention that preserves late-block geometry --- whatever
-its form --- should beat any intervention that operates purely in input
-space, which is what Tables~\ref{tab:mech} and \ref{tab:mit} already hint at.
+Three corollaries, each falsifiable with the released harness --- and one
+already tested. First (\emph{tested, refuted, replaced}): we predicted the
+floor's class identity would follow the readout's training prior; the
+imbalanced-prior experiment of \S\ref{sec:robust} refutes this --- even with
+a five-fold-oversampled non-frog prior, the collapse remains frog. The
+revised claim: the collapse target is a geometry attractor determined by
+which class prototype sits nearest the collapsed dark manifold, and it
+should be predictable from embedding distances alone, before any readout is
+trained. Second, severity-matched augmentation of the readout's training
+fold should recover most of what the adapted probe recovers, without ever
+seeing test-time corruptions at training time. Third, any intervention that
+preserves late-block geometry --- whatever its form --- should beat any
+intervention that operates purely in input space; this one is already
+confirmed at pilot scale, where the adapted readout beats the best
+enhancement by +15.8 points at $s{=}4$ ($p{=}0.007$) and +20.0 points at
+$s{=}5$ ($p{<}10^{-3}$).
 
 For practitioners, the guidance is short. Do not buy float-sensor capture for
 a frozen DINOv2 pipeline; it purchases nothing. Do not bolt CLAHE onto the

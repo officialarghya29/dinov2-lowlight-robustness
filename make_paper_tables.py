@@ -53,6 +53,7 @@ def main():
                          f"[{pct(r['ci_low'])}, {pct(r['ci_high'])}] & "
                          f"{f(r['mean_cosine_to_clean'], 2)} & {f(r['mean_logit_margin'], 2)} \\\\")
         lines += ["\\bottomrule", "\\end{tabular}"]
+        lines = ["\\resizebox{\\linewidth}{!}{%"] + lines + ["}"]
         with open(f"{args.out}/table_main.tex", "w") as f_out:
             f_out.write("\n".join(lines) + "\n")
 
@@ -65,6 +66,7 @@ def main():
             lines.append(f"{r['severity']} & {pct(r['acc_lowlight'])} & {pct(r['acc_lowpass'])} & "
                          f"{pct(r['acc_highpass'])} & {f(r['p_dark_vs_lowpass'])} \\\\")
         lines += ["\\bottomrule", "\\end{tabular}"]
+        lines = ["\\resizebox{\\linewidth}{!}{%"] + lines + ["}"]
         with open(f"{args.out}/table_freq.tex", "w") as f_out:
             f_out.write("\n".join(lines) + "\n")
 
@@ -77,6 +79,7 @@ def main():
             lines.append(f"{r['block']} & {f(r['cka_sev3'])} & {f(r['cka_sev5'])} & "
                          f"{f(r['drop_0_to_5'])} \\\\")
         lines += ["\\bottomrule", "\\end{tabular}"]
+        lines = ["\\resizebox{\\linewidth}{!}{%"] + lines + ["}"]
         with open(f"{args.out}/table_cka.tex", "w") as f_out:
             f_out.write("\n".join(lines) + "\n")
 
@@ -89,6 +92,7 @@ def main():
             lines.append(f"{r['severity']} & {pct(r['acc_fixed'])} & {pct(r['acc_adapted'])} & "
                          f"{100 * float(r['recovered_gap']):+.1f} \\\\")
         lines += ["\\bottomrule", "\\end{tabular}"]
+        lines = ["\\resizebox{\\linewidth}{!}{%"] + lines + ["}"]
         with open(f"{args.out}/table_mech.tex", "w") as f_out:
             f_out.write("\n".join(lines) + "\n")
 
@@ -101,6 +105,7 @@ def main():
             gap = 100 * (float(r["acc_float_stage1"]) - float(r["acc_uint8_full"]))
             lines.append(f"{r['severity']} & {pct(r['acc_float_stage1'])} & {pct(r['acc_uint8_full'])} & {gap:+.1f} \\\\")
         lines += ["\\bottomrule", "\\end{tabular}"]
+        lines = ["\\resizebox{\\linewidth}{!}{%"] + lines + ["}"]
         with open(f"{args.out}/table_quant.tex", "w") as f_out:
             f_out.write("\n".join(lines) + "\n")
 
@@ -113,6 +118,7 @@ def main():
             lines.append(f"{r['severity']} & {pct(r['acc_none'])} & {pct(r['acc_gain'])} & "
                          f"{pct(r['acc_gamma'])} & {pct(r['acc_clahe'])} \\\\")
         lines += ["\\bottomrule", "\\end{tabular}"]
+        lines = ["\\resizebox{\\linewidth}{!}{%"] + lines + ["}"]
         with open(f"{args.out}/table_mit.tex", "w") as f_out:
             f_out.write("\n".join(lines) + "\n")
 
@@ -137,6 +143,7 @@ def main():
             lines.append(f"{r['class']} & {pct(r['acc_clean'], 0)} & {pct(r['acc_sev1'], 0)} & "
                          f"{pct(r['acc_sev3'], 0)} & {pct(r['acc_sev5'], 0)} \\\\")
         lines += ["\\bottomrule", "\\end{tabular}"]
+        lines = ["\\resizebox{\\linewidth}{!}{%"] + lines + ["}"]
         with open(f"{args.out}/table_failure.tex", "w") as f_out:
             f_out.write("\n".join(lines) + "\n")
 
@@ -185,6 +192,7 @@ def main():
             lines.append(f"{r['block']} & {f(r['cka_sev3'])} & {f(r['cka_sev5'])} & "
                          f"{f(r['drop_0_to_5'])} \\\\")
         lines += ["\\bottomrule", "\\end{tabular}"]
+        lines = ["\\resizebox{\\linewidth}{!}{%"] + lines + ["}"]
         with open(f"{args.out}/table_vitb_cka.tex", "w") as f_out:
             f_out.write("\n".join(lines) + "\n")
 
@@ -200,6 +208,7 @@ def main():
             lines.append(f"{arm} & {f(r['backbone_params_M'], 1)} & {f(r['trainable_params_M'], 2)} & "
                          f"{lat} & {acc} \\\\")
         lines += ["\\bottomrule", "\\end{tabular}"]
+        lines = ["\\resizebox{\\linewidth}{!}{%"] + lines + ["}"]
         with open(f"{args.out}/table_eff.tex", "w") as f_out:
             f_out.write("\n".join(lines) + "\n")
 
