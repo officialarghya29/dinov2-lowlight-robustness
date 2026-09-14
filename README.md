@@ -277,6 +277,7 @@ Three corollaries, each falsifiable with this repo's harness:
 | Enhancement failure | exp 7 | `results_pilot/mitigation.csv` |
 | Frog collapse | `run_collapse_analysis.py` | `results_pilot/prediction_collapse.csv` |
 | Geometry-attractor test (F10) + readout-vs-enhancement (F11) | `run_corollaries.py` | `results_pilot/corollaries.json`, `corollary2_floor_stats.csv` |
+| ViT-B/14 replication | `run_vitb_generality.py` | `results_pilot/vitb_*.csv`, `vitb_cka_summary.json` |
 | Failure persistence | `src/supplementary.py` | `results_pilot/failure_summary.csv`, `failure_by_class.csv` |
 | Seed robustness | `src/supplementary.py` | `results_pilot/seed_sensitivity.csv` |
 | Efficiency | `src/supplementary.py` | `results_pilot/efficiency.csv` |
@@ -324,6 +325,8 @@ SHA-256, subset indices, environment) via `src/manifest.py`.
 ```bash
 pip install -r requirements.txt
 python3 run_pilot_cpu.py          # regenerates every number + figure above
+python3 run_vitb_generality.py    # optional: ViT-B/14 replication (~10 min)
+python3 run_corollaries.py        # optional: tests the paper's corollaries
 python3 make_readme_figures.py    # optional: rebuild docs/figures/
 python3 tests/run_tests.py        # 22/22 unit tests
 ```
