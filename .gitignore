@@ -30,3 +30,11 @@ output/
 
 # scratch logs from local runs
 *.log
+
+# LaTeX build intermediates
+*.aux
+*.bbl
+*.blg
+*.brf
+*.out
+*.log

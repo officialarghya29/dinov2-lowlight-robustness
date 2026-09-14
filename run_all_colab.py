@@ -14,7 +14,7 @@ Produces results/ with:
 Total runtime on T4: ~60-90 min (dominated by the 6-config LoRA ablation).
 """
 
-import sys, os, subprocess, json, time
+import sys, os, subprocess, json, time  # nosec B404 - Colab runner drives local scripts
 
 os.makedirs("/content/results", exist_ok=True)
 os.chdir("/content")
@@ -24,7 +24,7 @@ print("DINOv2 Low-Light Robustness — full paper suite")
 print("=" * 70)
 
 # --- deps ---
-subprocess.run([sys.executable, "-m", "pip", "install", "-q",
+subprocess.run([sys.executable, "-m", "pip", "install", "-q",  # nosec B603 - hardcoded package list
                 "scikit-learn", "scikit-image", "matplotlib", "scipy", "pyyaml"], check=False)
 
 import matplotlib
@@ -37,7 +37,7 @@ t_start = time.time()
 
 # --- run all 11 experiments (7 core + 4 supplementary) through the harness ---
 # (run_experiments.py must be uploaded alongside this file, with src/ and configs/)
-subprocess.run([sys.executable, "run_experiments.py", "--experiment", "all",
+subprocess.run([sys.executable, "run_experiments.py", "--experiment", "all",  # nosec B603 - hardcoded argv
                 "--outdir", "/content/results"], check=True)
 
 # ============================================================================

@@ -485,7 +485,10 @@ mid-frequency energy that DINOv2's features depend on, and the probe reads the
 redistribution as corruption. Enhancement fixes how images look to humans,
 not where they land in the embedding. The ``just enhance it first'' advice
 that dominates low-light engineering is, for frozen SSL features, at best a
-small win at the cliff bottom and at worst a large regression.
+small win at the cliff bottom and at worst a large regression. Figure~\ref{fig:mit} makes the
+comparison direct: the readout intervention dominates the best input-space
+fix at every severity where it matters, and the gap widens precisely where
+enhancement gives up.
 
 \begin{table}[t]
 \centering\small
@@ -494,6 +497,18 @@ CLAHE is destructive through severity 2.}
 \label{tab:mit}
 \input{results/table_mit}
 \end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_readout_vs_enhancement.pdf}
+\caption{(a)\ Per-severity deltas of zero-training mitigations relative to
+the no-mitigation baseline: retraining the linear probe on degraded
+embeddings dominates every input-space enhancement across the ladder.
+(b)\ The decisive comparison at the cliff: readout repair beats the best
+enhancement by 15.8 points at $s{=}4$ ($p{=}0.007$) and 20.0 points at
+$s{=}5$ ($p{=}4{\times}10^{-4}$), exact paired permutation tests.}
+\label{fig:mit}
+\end{figure}
 
 % ============================================================================
 \section{Robustness of the Findings}

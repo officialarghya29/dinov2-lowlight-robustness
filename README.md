@@ -295,6 +295,8 @@ SHA-256, subset indices, environment) via `src/manifest.py`.
 ├── run_pilot_cpu.py           # CPU pilot driver (what produced the numbers above)
 ├── run_collapse_analysis.py   # prediction-collapse quantification (F6)
 ├── run_vitb_generality.py     # ViT-B/14 replication of curve + CKA gradient
+├── run_corollaries.py         # tests the paper's falsifiable corollaries (C1 confirmed, C2 revised)
+├── make_mitigation_figure.py  # two-panel readout-repair vs enhancement figure (paper Fig. 4)
 ├── run_all_colab.py           # one-shot Colab GPU runner: all experiments + figures + zip
 ├── make_paper_tables.py       # CSV → LaTeX tables + macros (paper/results/)
 ├── make_paper_figures.py      # CSV → publication PDF/PNG figures (paper/figures/)
