@@ -30,6 +30,15 @@ data/
 output/**
 !output/notebook1/
 !output/notebook2/
+# Corruption-family re-runs (Phase-1/2 per family) — figures/tables of record,
+# referenced by the presentation gallery and RESEARCH §5.1; without these
+# negations the deployed site's images were never committed.
+!output/notebook1_blur/
+!output/notebook1_contrast/
+!output/notebook1_jpeg/
+!output/notebook2_blur/
+!output/notebook2_contrast/
+!output/notebook2_jpeg/
 logs/
 *.png
 !colab_results/**/*.png
@@ -75,6 +84,8 @@ colab_results/sessionA/
 !output/drift_proxy/**
 !output/drift_proxy_dinov2_check/
 !output/drift_proxy_dinov2_check/**
+!output/drift_proxy_smoke/
+!output/drift_proxy_smoke/**
 
 # Track 2 v8 ViT-B drift-profile kernel results of record (same situation)
 # Presentation app source
@@ -101,6 +112,32 @@ output/v9_lora/**/*.pt
 !output/v9_ablation/
 !output/v9_ablation/**
 output/v9_ablation/**/*.pt
+
+# Track 3 cross-family drift-atlas results of record (drift-atlas-v4 kernel,
+# 2026-10-14: 6 ImageNet + 2 CIFAR profile dirs, agreement reports, plots;
+# atlas_cache pickles stay out — regenerated locally by --cache-dir)
+!output/profiles/
+!output/profiles/**
+!output/atlas/
+!output/atlas/**
+!output/atlas_marks.log
+
+# Track 4 SSR S1 results of record (ssr-s1 kernel, 2026-10-14: 4 model×corr
+# dirs with results/meta/logs; marks log records the run incl. the
+# verifier-name-bug false FAILED line — see METHODS §7.11)
+!output/ssr/
+!output/ssr/**
+!output/ssr_marks.log
+
+# Track 4 SSR S2 attachment-probe + S3 replication results of record
+# (ssr-s2 / ssr-s3 kernels, 2026-10-15; verdicts METHODS §7.12/§7.13 —
+# 32-leg S3 grid incl. per-leg ssr_results.csv / ssr_meta.json / ssr.log)
+!output/ssr_s2/
+!output/ssr_s2/**
+!output/ssr_s2_marks.log
+!output/ssr_s3/
+!output/ssr_s3/**
+!output/ssr_s3_marks.log
 __pycache__/
 *.pyc
 .vercel

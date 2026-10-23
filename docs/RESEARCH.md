@@ -115,7 +115,28 @@ Reading the two together: the late-layer signature tracks *high-frequency destru
 - **Sublayer finding, invisible to the ViT-S whole-block CKA: under photometric corruption, MLP sublayers drift more than attention sublayers in all 12 blocks under both corruptions** (sev-5 low_light block 11: mlp 0.902 vs attn 0.847; block 10: 0.916 vs 0.878; jpeg block 10: 0.881 vs 0.819). The ViT-S profiler only saw whole blocks; the 37-module ViT-B atlas shows where inside each block the drift lives. Design consequence: attention-only LoRA leaves part of the measured drift unaddressed — a direct input for the v9 arms and the SSR recalibration scope (§11).
 - **The proxy-gate NO-GO replicates with the scale-invariance signature.** ViT-B's best proxies rank jpeg-drift well (sev-5 ρ = 0.876 energy_drop, 0.882 cos_drop — structural damage correlates with amplitude change) but fail low_light (ρ ≤ 0.69, top-5 containment 0.4–0.6), matching ResNet-50 and ViT-S. Full CKA stays the profiler; the paper claim remains "single cheap profiling pass" (two forward passes per condition, no labels, no backprop).
 
-**Estimator robustness.** All CKA values above use the biased (HSIC-ratio) estimator. Recomputing the full matrix with the unbiased linear CKA (Kornblith et al. 2019, App. B; `output/notebook2/cka_matrix_unbiased.csv`) changes the late-concentration *quantitatively but not qualitatively*: blocks 9–11 hold maximum drift under both estimators, and the unbiased values strengthen late concentration (block-10 sev-5 drop 0.815 → 0.859). Allocation impact: 3 of 12 block ranks shift by one at r = 8 (`docs/METHODS.md` §4). Additionally, the CKA pipeline was verified deterministic across CPU and T4 (agreement to ~1e-6; `docs/METHODS.md` §4), so CPU- and GPU-produced matrices are directly comparable.
+**Estimator robustness.** All CKA values above use the biased (HSIC-ratio) estimator. Recomputing the full matrix with the unbiased linear CKA (Kornblith et al. 2019, App. B; `output/notebook2/cka_matrix_unbiased.csv`) changes the late-concentration *quantitatively but not qualitatively*: blocks 9–11 hold maximum drift under both estimators, and the unbiased values strengthen late concentration (block-10 sev-5 drop 0.815 → 0.859). Allocation impact: 3 of 12 block ranks shift by one at r = 8 (`docs/METHODS.md`§4). Additionally, the CKA pipeline was verified deterministic across CPU and T4 (agreement to ~1e-6; `docs/METHODS.md` §4), so CPU- and GPU-produced matrices are directly comparable.
+
+### 5.2 The cross-family drift atlas — Track 3 (2026-10-14)
+
+The profiling harness (`run_drift_proxy.py` + `run_drift_profile.py`, model-agnostic via timm) was run over six ImageNet-pretrained families in one Kaggle T4 session (kernel `arindamtripathi/drift-atlas-v4`, 46 min wall, `fail=0`; protocol `docs/METHODS.md` §7.10): **ResNet-50** (CNN), **ConvNeXt-T** (CNN), **ViT-S/16**, **DeiT-S** (ViT), **Swin-T** (hybrid), **DINOv2 ViT-B/14** (self-supervised ViT), each on the same seeded ImageNet-val subset (n = 2,000, seed 42, `sautkin/imagenet1kvalid`), low_light + jpeg × severities 1–5, forward-only CKA (unbiased estimator as the profile of record). A CIFAR-10 consistency leg (ResNet-50 + ConvNeXt-T, n = 1,000, sev 1/5) anchors the atlas to the Track 1/2 image axis. Artifacts: `output/profiles/<model>/` (10 drift CSVs + agreement reports each) and the aggregated `output/atlas/` (`atlas_summary.csv`, Fig. 1 candidate `atlas_fig1.png`; builder `tools/build_atlas.py`).
+
+**The cross-architecture question, answered.** The hypothesis going in was "CNNs drift early, ViTs late, hybrids in between." The atlas says **that framing is wrong**. Late-half drift mass (fraction of total sev-5 CKA drop in the deeper half of profiled modules; 0.5 = uniform):
+
+| model | family | low_light | jpeg |
+|---|---|---|---|
+| Swin-T | hybrid | 0.664 | **0.823** |
+| ViT-S/16 | ViT | 0.615 | 0.762 |
+| ResNet-50 | CNN | 0.536 | 0.725 |
+| DeiT-S | ViT | 0.519 | 0.621 |
+| ConvNeXt-T | CNN | 0.587 | 0.489 |
+| DINOv2 ViT-B/14 | ViT (self-sup.) | **0.380** | **0.429** |
+
+Late-heavy drift is the *default across all three families* — 5 of 6 models ≥ 0.52 on low_light, both CNNs included (the §1.2 ResNet-50 late-heavy profile replicates on ImageNet), and the hybrid Swin-T is the **most** late-heavy model in the roster, not an in-between. The one model that flips to early-heavy under *both* corruptions is the self-supervised **DINOv2**: patch_embed drop 0.38, blocks.0 drop 0.54, worst module blocks.1.mlp (0.82) — while its supervised ViT cousins (ViT-S: worst block.10.mlp, 0.98; DeiT-S: worst block.7.mlp) sit mid-to-late. The discriminating axis therefore looks closer to the **pretraining objective** (self-distillation on uncurated data may make early layers carry more corruption-sensitive structure) than to conv-vs-attention topology. This is the reviewer-facing atlas result: *where representation damage lives is family-dependent, but not by the CNN/ViT cut everyone assumes.*
+
+**Two corroborating checks.** (a) Mean CKA drop is strictly severity-monotone on all 6 models × 2 corruptions (e.g. ResNet-50 low_light 0.013 → 0.038 → 0.080 → 0.158 → 0.320) — the profiles are signal, not n = 2,000 noise. (b) The Track 1 proxy-gate NO-GO replicates on all 6 architectures (best low_light ρ = 0.69, DINOv2 cov_shift; jpeg ρ reaches 0.91, Swin cov_shift) — the "amplitude statistics cannot rank structural drift" diagnosis now spans six models, and full CKA stays the profiler.
+
+**Honest limits.** n = 2,000 (not the planned 10k — rank stability at n = 1k was established in Track 2); single-seed; no state-space/Mamba row (timm ships no vmamba without the separate `ssm` package — parked, not hidden); and the image axis moves the numbers (ResNet-50's CIFAR consistency leg is later than its ImageNet leg, 0.718 vs 0.536), so cross-dataset profile comparisons are qualitative. What the atlas does *not* yet show is whether allocation/recalibration driven by these profiles pays off on the new families — that is the atlas-family extension of Tracks 2/4, and the one open piece of the generality claim.
 
 ---
 
@@ -264,6 +285,140 @@ Artifacts: `output/v9_lora/summary.csv` (9 rows) + `output/v9_lora/{uniform,drif
 
 Artifacts: `output/v9_ablation/summary.csv` (9 rows) + `output/v9_ablation/seed{42,43,44}/{btau,topk,invbeta}/` (per-arm logs, training curves, accuracy plots; adapter `.pt` recoverable from the kernel output — git-ignored by policy); kernel log `output/v9_ablation/kernel_log.txt`. Re-harvest: `kaggle kernels output arindamtripathi/vitb-lora-abl -p <dir>`.
 
+### 6.7 SSR S1 on real ImageNet-val — the gate works, the repair doesn't (Track 4, 2026-10-14)
+
+The Track 4 S1 smoke (SSR_PLAN §7) ran `run_ssr.py` on the real `imagenet1kvalid` mount for one BN model (ResNet-50) and one LN model (ViT-S/16), each under low_light + jpeg at severities 1 and 5, seed 42, n_pool=128 (gate calibration + estimation), n_eval=512 disjoint eval images. Selection input was the Track 3 atlas severity-5 CSVs — **one measurement, two consumers, live**: ResNet's top-6/25 and ViT-S's top-10/38 came straight from `output/profiles/*/drift_profile_sev5_*.csv`. Arms: frozen · SSR top-k · SSR all · SSR gate-off · BN-stats (ResNet only) · TENT · AQR · CLAHE. Kernel `arindamtripathi/ssr-s1`, T4, 2,027 s, all 4 invocations rc=0 (METHODS §7.11).
+
+Top-1 (%), gate state in brackets — the full grid in `output/ssr/*/ssr_results.csv`:
+
+| model | corruption | sev | frozen | ssr_topk | ssr_all | tent | aqr | clahe |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| ResNet-50 | jpeg | 1 [closed] | 74.8 | 74.8 | 74.8 | 74.4 | 74.8 | 67.0 |
+| ResNet-50 | jpeg | 5 [open] | 61.7 | 9.4 | 0.0 | **62.5** | 26.0 | 56.8 |
+| ResNet-50 | low_light | 1 [open] | 72.9 | 64.1 | 0.2 | **73.0** | 68.2 | 67.0 |
+| ResNet-50 | low_light | 5 [open] | 33.0 | 0.2 | 0.4 | **31.3** | 0.4 | 13.7 |
+| ViT-S/16 | jpeg | 1 [closed] | 70.9 | 70.9 | 70.9 | 70.9 | 68.4 | 62.3 |
+| ViT-S/16 | jpeg | 5 [open] | 63.7 | 61.9 | 3.5 | **63.7** | 41.8 | 51.0 |
+| ViT-S/16 | low_light | 1 [open] | 73.6 | 72.1 | 1.8 | **73.6** | 59.2 | 60.7 |
+| ViT-S/16 | low_light | 5 [open] | 9.2 | 0.2 | 0.2 | 9.2 | 0.0 | **31.4** |
+
+**Pre-registered claims (SSR_PLAN §1): all four hold; the practical value claim does not.**
+
+- **C2 (identity gate) — confirmed, cleanly.** All four invocations report `bit_identical: true`, disarmed-hook max|Δlogit| = 0.0 on clean inputs. The gate also *discriminated* correctly: closed on jpeg sev1 for both families (shift distance 0.047 / 0.033, below τ = 0.106 / 0.082), open everywhere else, with the per-condition distance ordering the severities and corruptions exactly as the atlas CKA did (low_light > jpeg; sev5 > sev1; same order on both models). Detection is a solved problem here.
+- **C1 (selectivity) — confirmed as pre-registered (top-k vs all).** In every open-gate cell SSR-top-k ≥ SSR-all, usually by 50+ points (ViT-S jpeg sev5: 61.9 vs 3.5; ResNet low_light sev1: 64.1 vs 0.2). The pre-registered failure mode (§1: SSR-all ≥ SSR-top-k → selection inert) did not occur — the drift-ranked scope is doing enormous work.
+- **C3/C4 — confirmed mechanically.** Forward-only, label-free; both BN/conv and LN/token paths ran the full arm set with per-image SSR cost ≈ frozen (arm wall times 2.7–3.1 s vs frozen 2.6–3.0 s per condition).
+- **But: moment-matching repair is net-harmful at every open gate.** SSR-top-k loses 1.6–52.3 points vs frozen across all six open cells on both families. The §9 risk materialized in full: amplitude statistics can't *rank* structural drift (Track 1 NO-GO) and, on this evidence, can't *repair* it either — matching per-channel (μ, σ) at module outputs distorts the representation more than the corruption did at sev≥1. The fallback frame in §1 ("same result at lower cost") doesn't rescue it: there is no gain to reframe.
+
+**External calibration — the failure is family-wide, not SSR-specific.** The two strongest published backprop-free baselines also fail at these severities: AQR loses 2.5–35.7 points everywhere except a wash at ResNet jpeg sev1; Schneider-style BN-stat replacement collapses outright on ResNet (13.3% at jpeg sev1, ~0% at sev5 — and note the gate is *not* what stopped it: bn_stats applies regardless, modules_touched=0). Against that backdrop, **TENT is the only arm that never loses** (−1.8 to +0.8 across all 8 cells) — consistent with its literature standing as the practical default, with the caveat that its best gain here (+0.8) is inside the ~±2 pt binomial noise of n=512.
+
+**One large positive delta in the whole grid: CLAHE on ViT-S low_light sev5, 9.2 → 31.4 (+22.3).** Model-dependent and asymmetric — the same arm *loses* 19.3 points on ResNet-50 at the identical condition. Enhancement front-ends remain a per-backbone empirical question, not a free win (consistent with §6.2's ExDark finding that CLAHE buys nothing in real darkness).
+
+**Gate-off ablation (ResNet jpeg sev1: 74.8 → 75.4, +0.6).** Always-on recalibration at the mildest shift produced a +0.6 pt change — within noise, and against −8.8 at low_light sev1 — so the gate's conservative closed verdict at jpeg sev1 trades a noise-level possible gain for guaranteed identity; that is the correct trade for a safety property.
+
+**Verdict.** SSR's four claims survive; its mechanism does not. What the S1 run establishes for the framework paper: (a) the clean-calibrated shift gate gives exactly-identity on clean inputs *and* correct shift/no-shift discrimination on real data, cross-family; (b) drift-ranked selection from the shared atlas bounds the damage of a failing repair by 50+ points relative to adapt-all — the one-measurement-two-consumers selection signal demonstrably does real work; (c) on this roster the only label-free test-time recipe that never hurts is TENT, and the only large positive is CLAHE on one backbone. Whether the repair failure is mechanistic (second-moment matching itself) or an attachment-point artifact (SSR_PLAN §2's open question — post-norm outputs may be the wrong place) is the one question worth a cheap targeted follow-up before the mechanism is written off; that is the S2 decision (§10) — taken 2026-10-15: run the attachment-point probe (SSR_PLAN §7.2); run and verdict in §6.8.
+
+Single-seed (42), n_eval=512: deltas within ±2 pts are not readable; every effect called significant above exceeds that band. Artifacts: `output/ssr/{resnet50,timm_vit_small_patch16_224}_{low_light,jpeg}/` (`ssr_results.csv`, `ssr_meta.json`, `ssr.log`) + `output/ssr_marks.log`. Re-harvest: `kaggle kernels output arindamtripathi/ssr-s1 -p <dir>`.
+
+### 6.8 SSR S2 attachment-point probe — where you attach decides whether the repair helps (Track 4, 2026-10-15)
+
+**Run.** The one question §6.7 left open — mechanistic failure vs attachment-point artifact (SSR_PLAN §2/§7.2) — was run as the cheap targeted probe: seven legs on kernel `arindamtripathi/ssr-s2` v1, Tesla T4, **601 s total**, all legs rc=0 (`SSR_S2_COMPLETE`, audit `output/ssr_s2_marks.log`). Protocol is S1's byte-for-byte — seed 42, low_light × sev {1, 5}, n_pool = 128 / n_eval = 512 disjoint, B = 4 × 64, k = top 25% of the scope's rows, per-leg identity check — with `--attach` the only variable: ResNet-50 {profiled, sublayer, stream} × ViT-S {profiled, sublayer, stream, norm} (scope definitions SSR_PLAN §7.2). The `profiled` legs are the within-script S1 control and **reproduce S1 exactly across independent sessions** (ResNet frozen 72.9 / 33.0 with ssr_topk 64.1 / 0.2; ViT-S frozen 73.6 / 9.2 with ssr_topk 72.1 / 0.2) — which is what licenses within-run cross-scope comparison.
+
+**C2 holds on every leg (7/7):** `bit_identical: true` on clean inputs, disarmed-hook max|Δlogit| = 0.0, gate closed on clean; gate open in all 14 shifted leg × severity evaluations (sev5 shift distances 0.56–0.86 vs leg-specific τ = 0.064–0.112).
+
+**Top-1 (%), Δ vs frozen in parentheses — every cell gate-open; full grid `output/ssr_s2/*/ssr_results.csv`:**
+
+| model | scope (k) | sev1 frozen → ssr_topk | sev1 tent | sev5 frozen → ssr_topk | sev5 tent |
+|---|---|---|---|---|---|
+| ResNet-50 | profiled — S1 control (6) | 72.9 → 64.1 (−8.8) | 73.1 (+0.2) | 33.0 → 0.2 (−32.8) | 31.4 (−1.6) |
+| ResNet-50 | sublayer (4) | 72.9 → 66.6 (−6.3) | 73.1 (+0.2) | 33.0 → 0.8 (−32.2) | 31.2 (−1.8) |
+| ResNet-50 | **stream (1)** | 72.9 → 73.6 (+0.8) | 73.1 (+0.2) | 33.0 → **37.3 (+4.3)** | 31.2 (−1.8) |
+| ViT-S/16 | profiled — S1 control (10) | 73.6 → 72.1 (−1.6) | 73.6 (0.0) | 9.2 → 0.2 (−9.0) | 9.2 (0.0) |
+| ViT-S/16 | **sublayer (6)** | 73.6 → 74.0 (+0.4) | 73.6 (0.0) | 9.2 → 7.8 (−1.4) | 9.2 (0.0) |
+| ViT-S/16 | stream (3) | 73.6 → 73.2 (−0.4) | 73.6 (0.0) | 9.2 → 4.3 (−4.9) | 9.2 (0.0) |
+| ViT-S/16 | norm (6) | 73.6 → 73.6 (0.0) | 73.6 (0.0) | 9.2 → 5.5 (−3.7) | 9.2 (0.0) |
+
+- **Attachment point flips the verdict** (the §6.7 open question): same gate, same selection signal, same protocol — only WHERE varies — and the outcome spans **−32.8 → +4.3 on ResNet-50 at sev5** and **−9.0 → −1.4 on ViT-S at sev5**. S1's failure is not scope-invariant: the artifact explanation is substantially right.
+- **The first positive SSR repair cell in the project: ResNet stream at sev5 (33.0 → 37.3, +4.3, outside the ±2 band),** with sev1 +0.8 (inside the band, direction-consistent). Its entire scope is one module — the `layer4` stage output (k = 1 of 4 stage rows).
+- **Each family has its own rescuing scope, and both act before the network's mid-point is adapted:** ResNet repairs positively only at the final stage boundary, while repairing bottleneck outputs (sublayer: `layer1.0/1.1/1.2` + `layer4.2`) retains essentially all of the harm (−32.2); ViT repairs at attn/mlp outputs (−1.4, inside noise), while its post-block stream (−4.9) and its norm outputs — the S1 attachment class — (−3.7) remain harmful. Location dominates the outcome; the gate and the selection signal are unchanged and doing their jobs.
+- **k cannot explain the ordering** — but is confounded with scope by the 25% policy (the winning ResNet leg is also the smallest k). Note ResNet stream-top-1 (`layer4`) and sublayer's top drift row (`layer4.2`) are the *same tensor* (stage ≡ last bottleneck), so at k = 1 those two scopes would be identical by construction; the real contrast is that sublayer/profiled additionally repair *mid/early* modules — which is where the harm lives. A k-matched scope ablation is therefore a required S3 item, not an afterthought.
+- **Control:** TENT stays flat again (ViT 0.0 in all four legs; ResNet +0.2 at sev1, −1.6 to −1.8 at sev5 — inside S1's −1.8..+0.8 band).
+
+**Harness caveat that touches the controls (both sessions).** The `profiled` selections contain container/child duplicates of the *same tensor* — ViT's top-10 holds both `blocks` and `blocks.11`; ResNet's top-6 holds both `layer1`/`layer1.2` and `layer4`/`layer4.2` (verified: identical tensor object; the container's forward hook receives the child hook's transformed output), so on those values the affine composes twice, y → a(ay + b) + b. S1's numbers carry the same duplication — which is exactly why the profiled parity above is bit-close — and it means `profiled` harm may be harness-amplified rather than purely attachment-driven. The non-profiled scopes are duplicate-free by construction (that is precisely why `stream` excludes the containers, SSR_PLAN §7.2); a deduplicated-profiled rerun is an S3 item.
+
+**Verdict.** Moment matching is **not written off**. S1's "the repair doesn't" resolves to "S1 attached it mostly wrong": with gate and selection held fixed, a scope change turns ResNet-50's sev5 collapse into +4.3 and reduces ViT-S's to noise level. What the paper can claim now, honestly scoped: (a) C2's identity gate and drift-ranked selection held unchanged across *every* scope — the framework's claims are robust to attachment; (b) SSR has a **scope-qualified positive regime** — final-stage-boundary repair on ResNet-50, attn/mlp-scoped repair on ViT-S — with mid-network and post-norm attachments retaining S1's harm; (c) the positive is one cell, one seed, one corruption — **S3 is now replication, not rescue**: seeds × {low_light, jpeg} × the full severity ladder, plus the k-matched and deduplicated-profiled ablations, before any positive claim is promoted. Roster positives stand at two: CLAHE@ViT-S low_light sev5 (+22.3) and SSR-stream@ResNet-50 low_light sev5 (+4.3).
+
+**Limits.** Single seed (42), n_eval = 512 (±2 pts readable), two models, one corruption — this is the probe the plan priced at ~1 h (actual: 10 min), not the grid. Artifacts: `output/ssr_s2/{resnet50,timm_vit_small_patch16_224}_{profiled,sublayer,stream,norm}_low_light/` (`ssr_results.csv` = 8 rows, `ssr_meta.json` with `attach`, `ssr.log`) + `output/ssr_s2_marks.log`. Re-harvest: `kaggle kernels output arindamtripathi/ssr-s2 -p <dir>`.
+
+---
+
+## 6.9 SSR S3 replication grid — seeds × {low_light, jpeg} × severity ladder before promoting any positive claim (Track 4, 2026-10-15)
+
+**Run.** The S2 probe (§6.8) resolved the attachment-versus-mechanism question at a single seed, but the framework's claim structure requires replication across the full experimental grid before any positive claim is promoted. This kernel `arindamtripathi/ssr-s3` v1, Tesla T4, produced **all 32 planned legs complete** — 24 replication legs at k = 25% of each scope's rows (2 models × 2 scopes × 2 corruptions × seeds 42/43/44) plus 8 k-matched legs at seed 42 (ResNet-50 top-1, ViT-S top-3) — all rc=0, identity bit-identical on 32/32, `script_done fail=0 legs=32`. Driver wall 2 125 s ≈ **35 min** (`output/ssr_s3_marks.log`).
+
+**Replication table:** per (model, scope, corr, severity) the ssr_topk delta-vs-frozen as mean ± sd across the 3 replication seeds (k = 25; every cell n = 3).
+
+| model       | scope     | corr       | sev  | n   | delta mean±sd  |
+|-------------|-----------|------------|------|-----|----------------|
+| ResNet50    | stream    | jpeg       | 1    | 3   | +0.0±0.0       |
+| ResNet50    | stream    | jpeg       | 5    | 3   | +4.1±2.4       |
+| ResNet50    | stream    | low_light  | 1    | 3   | +0.2±0.7       |
+| ResNet50    | stream    | low_light  | 5    | 3   | +5.1±0.8       |
+| ResNet50    | sublayer  | jpeg       | 1    | 3   | +0.0±0.0       |
+| ResNet50    | sublayer  | jpeg       | 5    | 3   | −24.0±1.6      |
+| ResNet50    | sublayer  | low_light  | 1    | 3   | −7.6±1.9       |
+| ResNet50    | sublayer  | low_light  | 5    | 3   | −32.8±1.2      |
+| ViT-S/16    | stream    | jpeg       | 1    | 3   | +0.0±0.0       |
+| ViT-S/16    | stream    | jpeg       | 5    | 3   | −0.9±1.1       |
+| ViT-S/16    | stream    | low_light  | 1    | 3   | −0.5±0.7       |
+| ViT-S/16    | stream    | low_light  | 5    | 3   | −4.6±1.4       |
+| ViT-S/16    | sublayer  | jpeg       | 1    | 3   | +0.0±0.0       |
+| ViT-S/16    | sublayer  | jpeg       | 5    | 3   | −0.1±0.7       |
+| ViT-S/16    | sublayer  | low_light  | 1    | 3   | +0.1±0.3       |
+| ViT-S/16    | sublayer  | low_light  | 5    | 3   | −3.1±1.7       |
+
+→ **ResNet stream at sev5 low_light (+5.1±0.8) and stream jpeg (+4.1±2.4) are reproducible** across the 3 seeds — the S2 positive generalizes to the full seed distribution.
+
+→ **ResNet sublayer at sev5 low_light (−32.8±1.2) and jpeg (−24.0±1.6) remain strongly negative** across all seeds, confirming the scope-qualified harm.
+
+→ **ViT stream at sev5 low_light (−4.6±1.4) and jpeg (−0.9±1.1) are noise-level** across seeds, consistent with S2's −1.4 / −4.9 findings.
+
+→ **ViT sublayer is noise-level in every cell** (low_light sev5 −3.1±1.7, jpeg sev5 −0.1±0.7): the +0.8 jpeg-sev5 value seen at seed 42 alone **fails to replicate** — it does not become a third roster cell.
+
+**S2 parity check** (low_light, seed 42, k25): all 8 (model × scope × severity) cells reproduce S2 **exactly** — ResNet stream +0.8 / +4.3, ResNet sublayer −6.2 / −32.2, ViT stream −0.4 / −4.9, ViT sublayer +0.4 / −1.4 — so the S2 snapshot is bit-for-bit confirmed; the only new information is the cross-seed spread in the table above.
+
+**K-matched control** (seed 42): dedicated k = absolute-top-row legs vs the k = 25% primary (ResNet top-1; ViT top-3), isolating row-set size from location:
+
+| model       | scope     | corr       | sev  | k25      | k_abs    |
+|-------------|-----------|------------|------|----------|----------|
+| ResNet50    | stream    | jpeg       | 1    | +0.0     | +0.0     |
+| ResNet50    | stream    | jpeg       | 5    | +3.3     | +3.3     |
+| ResNet50    | stream    | low_light  | 1    | +0.8     | +0.8     |
+| ResNet50    | stream    | low_light  | 5    | +4.3     | +4.3     |
+| ResNet50    | sublayer  | jpeg       | 1    | +0.0     | +0.0     |
+| ResNet50    | sublayer  | jpeg       | 5    | −25.6    | +3.3     |
+| ResNet50    | sublayer  | low_light  | 1    | −6.2     | +0.8     |
+| ResNet50    | sublayer  | low_light  | 5    | −32.2    | +4.3     |
+| ViT-S/16    | stream    | jpeg       | 1    | +0.0     | +0.0     |
+| ViT-S/16    | stream    | jpeg       | 5    | −2.0     | −2.0     |
+| ViT-S/16    | stream    | low_light  | 1    | −0.4     | −0.4     |
+| ViT-S/16    | stream    | low_light  | 5    | −4.9     | −4.9     |
+| ViT-S/16    | sublayer  | jpeg       | 1    | +0.0     | +0.0     |
+| ViT-S/16    | sublayer  | jpeg       | 5    | +0.8     | +1.0     |
+| ViT-S/16    | sublayer  | low_light  | 1    | +0.4     | −0.4     |
+| ViT-S/16    | sublayer  | low_light  | 5    | −1.4     | −2.0     |
+
+→ **Where k25 already equals k_abs the rerun is a harness sanity check**: ResNet `stream` has 4 stage rows (25% → k = 1) and ViT `stream` 12 (25% → k = 3) — those legs reproduce exactly, so the stream positive *is* the minimal single-module repair (ResNet `layer4`).
+
+→ **The informative contrast is ResNet `sublayer` (k25 = 4 vs k_abs = 1)**: at k = 1 its top row is `layer4.2` — the *same tensor* as `stream`'s `layer4` — and it matches the stream result (+4.3 @sev5); the collapse appears only when the 25% set pulls in the mid/early rows (−6.2 @sev1, −32.2 @sev5). **The harm is carried by the extra mid/early rows, not by the top-ranked location.**
+
+→ **ViT sublayer (k25 = 6 vs k_abs = 3) stays noise-level under both k settings** (low_light sev5 −1.4 vs −2.0; jpeg +0.8 vs +1.0) — nothing resolvable above noise, and over 3 seeds the same cells read −3.1±1.7 / −0.1±0.7.
+
+→ **Control: TENT stays flat across the grid** — ViT exactly 0.0 in every leg; ResNet within −0.6..+0.4 pts at sev1 and −1.8..+2.0 pts at sev5 (S1's band on its own legs was −1.8..+0.8; the +2.0 jpeg-sev5 end is the largest deviation). The identity gate held bit-identical on 32/32 legs.
+
+**Verdict.** S3 is **replication, not rescue**, and it is now *complete for the planned grid*: 32/32 legs, identity 32/32, S2 exact at seed 42. What replicates: ResNet-50 `stream` (low_light sev5 **+5.1±0.8**, jpeg +4.1±2.4 over 3 seeds); what is confirmed negative: ResNet `sublayer` (−32.8±1.2 low_light / −24.0±1.6 jpeg); what is noise: every ViT-S cell — including the seed-42-only jpeg positive that failed to replicate. The roster of confirmed positives stands at exactly two cells: (a) CLAHE@ViT-S low_light sev5 (+22.3, from §6.2) and (b) SSR-stream@ResNet-50 low_light sev5 (+4.3 at seed 42 → **+5.1±0.8** over 3 seeds, from §6.8/§6.9). Before promoting (b) past this grid: the **deduplicated-profiled ablation** (harness caveat §6.8) and the **4 remaining models of the 6-model grid** are still open.
+
+**Limits.** 3 seeds (42/43/44), n_eval = 512 (±2 pts readable), two models, two corruptions, two scopes, k = 25% with the k-matched arm at one seed — this grid priced at ~90 min (actual: ~35 min), against the S2 probe's ~1 h price (actual: 10 min). Artifacts (committed): `output/ssr_s3/{resnet50,timm_vit_small_patch16_224}_{stream,sublayer}_k{25,1|3}_{low_light,jpeg}_s{42,43,44}/` (`ssr_results.csv`, `ssr_meta.json`, `ssr.log`) + `output/ssr_s3_marks.log` (`script_done fail=0 legs=32`). Re-harvest: `kaggle kernels output arindamtripathi/ssr-s3 -p <dir>`; aggregate in-repo: `python3 scripts/analyze_ssr_s3.py`.
+
 ---
 
 ## 7. The Findings in Plain Language
@@ -316,7 +471,7 @@ Two related issues surfaced during a full-codebase audit and re-run. First, augm
 
 - **Synthetic-first design; real data used for validation only.** Our corruptions simulate darkness and frequency loss, not ISP pipelines, color casts, or exposure metadata. The ExDark suite (§6.2) quantifies the sim-to-real gap — adaptation transfers, but only ~9% of the synthetic-axis gain — rather than closing it.
 - **Real-dark validation is bounded by ExDark's luminance range.** ExDark is dark but not extreme; the flat accuracy curve shows the synthetic collapse (an extreme, lower-luminance regime) simply does not manifest there. Findings about *extreme* darkness remain synthetic-only.
-- **One dataset, one backbone size.** CIFAR-10 at 32×32 (upsampled to 224×224) is far from ImageNet-scale statistics; the ViT-B *profile* replication is done (§5.1) and the ViT-B LoRA arms landed at n=3 — parity with uniform at 24% fewer params (§6.5) — but the cross-family atlas is still pending, so generality of the *fix* across model families is not yet verified.
+- **One dataset, one backbone size.** CIFAR-10 at 32×32 (upsampled to 224×224) is far from ImageNet-scale statistics; the ViT-B *profile* replication is done (§5.1) and the ViT-B LoRA arms landed at n=3 — parity with uniform at 24% fewer params (§6.5). The cross-family **profile** atlas has since run (§5.2, six families on ImageNet-val) — but the *fix* (drift-weighted allocation, SSR recalibration) is still only verified on ViT-S/ViT-B, so cross-family generality of the intervention itself is not yet established.
 - **Corruption-family LoRA arms are single-seed (seed 42).** The §6.1 error bars (±1.2–1.9 pts across seeds) come from the low-light family; family deltas (+19.3 JPEG, +17.7 blur, +6.9 contrast) exceed that noise comfortably, but family-level parity claims (drift vs uniform within blur or contrast) are single-seed and should not be over-read.
 - **Biased CKA estimator in the published allocation.** The drift-weighted ranks derive from the biased estimator's profile; the unbiased recompute shifts 3 of 12 block ranks by one (§5.1) without changing the late-heavy structure. A LoRA re-run on the unbiased profile is planned but unverified.
 - **Linear probe ceiling.** A stronger head might partially compensate for feature drift; we measured the *linear* story deliberately.

@@ -5,7 +5,22 @@ architecture-agnostic directions, free-tier compute plan) with the current state
 this repo. All GPU work assumes free-tier Colab/Kaggle (METHODS §11); total GPU cost
 of the recommended path fits in ~2–3 weeks of Kaggle quota (30 h/week).*
 
-*Last updated 2026-10-12: upstream PR #4 (allocation-shape ablations) MERGED (`0ad0ef5`) —
+*Last updated 2026-10-22: **docs/site sync** — `index.html` re-exported (was stale at
+14 sections; the Track-4 SSR section never reached the deployed site), 24 gallery figures
+committed (were gitignored — `07 §A7`), `scripts/ci_local.sh` added as the local CI gate
+(GitHub Actions billing-locked since 10-14; upstream CI green on PR #7).
+Last update before that, 2026-10-15: **Track 4 SSR S1–S3 complete** (verdicts RESEARCH
+§6.7–§6.9, SSR_PLAN §7; results of record `output/ssr{,_s2,_s3}/`; 32/32-leg S3 grid,
+ResNet `stream` +5.1±0.8 replicates, `sublayer` harm confirmed, all ViT cells noise).
+Before that, 2026-10-14: **Track 3 atlas DONE** (kernel `drift-atlas-v4`, T4, 46 min,
+`fail=0` — 6 ImageNet + 2 CIFAR profiles harvested, `output/profiles/` + aggregated
+`output/atlas/` with the Fig. 1 candidate; verdict RESEARCH §5.2 / DPA_DESIGN §2:
+late-heavy drift is the cross-family default, DINOv2 the early-heavy outlier — the
+"CNNs early vs ViTs late" cut is wrong; proxy-gate NO-GO replicated on all 6).
+Also 2026-10-14: SSR prior-art round 3 (no narrowing, DPA_DESIGN §6); commits
+`7561daf` (harness + SSR/AQR core + v4 hardening) and `93b53ca` (atlas artifacts).
+Track 4 (`run_ssr.py`) is now unblocked — it consumes the atlas CSVs (SSR_PLAN §10).
+Before that, 2026-10-12: upstream PR #4 (allocation-shape ablations) MERGED (`0ad0ef5`) —
 results of record now on upstream `main`, fork `main` synced; presentation ViT-B section
 extended with the v9 n=3 + ablation verdicts (RESEARCH §6.5/§6.6).
 Before that (10-11): v9 allocation-shape ablations DONE at n=3 (β^τ / top-k /
@@ -161,16 +176,27 @@ agreement-checked against CKA on a model with a different architecture (ResNet-5
   cross-architecture profile pair (ViT-S vs ViT-B).
 - Fold into RESEARCH §6 + the future framework paper as the ViT data point.
 
-### Track 3 — Cross-family drift profiles (the centerpiece; ~5–10 GPU-hours)
-**Models (timm, all ≤ 90M):** ResNet-50, ConvNeXt-Tiny, ViT-S/16, Swin-Tiny, DeiT-S
-(+ ViT-B/14 from Track 2; + one state-space/Mamba vision model if accessible).
-**Protocol:** same ImageNet-val 10k subset (cached fp16 features), synthetic
-low_light/jpeg severity pairs, per-stage/per-block CKA + proxy profiles.
-- **The finding reviewers cannot get elsewhere:** do CNNs drift early and ViTs late?
-  Hybrid/state-space in between? This is the cross-architecture claim.
-- Output: the profile atlas (`output/profiles/<model>_<corruption>.csv`) +
-  `docs/DPA_DESIGN.md` §2 + the paper's Fig. 1.
-- Cost control: forward-only, cached features, one Kaggle session per 2 models.
+### Track 3 — Cross-family drift profiles (the centerpiece) — **DONE 2026-10-14**
+**Roster run (timm, all ≤ 90M):** ResNet-50, ConvNeXt-Tiny, ViT-S/16, Swin-Tiny,
+DeiT-S, DINOv2 ViT-B/14 (Track 2) — 6/6 ImageNet legs + 2 CIFAR consistency legs in
+one T4 session (kernel `drift-atlas-v4`, 46 min wall, `fail=0`, `ATLAS_COMPLETE`;
+protocol METHODS §7.10). State-space/Mamba row skipped: timm ships no vmamba without
+the separate `ssm` package — recorded, not hidden. n = 2,000 not 10k (cost control;
+rank stability at n ≥ 1k already established in Track 2).
+- **The finding reviewers cannot get elsewhere (RESEARCH §5.2 / DPA_DESIGN §2):**
+  the "CNNs early vs ViTs late" hypothesis is **wrong as posed** — late-heavy drift
+  is the cross-family default (5/6 models late-heavy on low_light, CNNs included);
+  the hybrid Swin-T is the *most* late-heavy; the one early-heavy model is the
+  self-supervised DINOv2 (blocks.1.mlp worst, 0.82) — pretraining objective looks
+  like the discriminating axis, not conv-vs-attention. Proxy-gate NO-GO replicated
+  on all 6 (full CKA stays the profiler).
+- Output: `output/profiles/<model>/` (10 CSVs + agreement reports each) +
+  aggregated `output/atlas/atlas_summary.csv` + Fig. 1 candidate
+  `output/atlas/atlas_fig1.png` (`tools/build_atlas.py`) + DPA_DESIGN §2.
+- Re-harvest: `kaggle kernels output arindamtripathi/drift-atlas-v4 -p <dir>`.
+- Open follow-up (feeds Track 4's scope + the paper's generality claim): run the
+  allocation/SSR arms on the atlas families — the profiles exist, the *fix* is
+  still verified only on ViT-S/ViT-B.
 
 ### Track 4 — SSR: selective statistic recalibration (label-free; ~5–8 GPU-hours)
 - Store clean per-module channel statistics (μ, σ) once per model.
@@ -180,6 +206,19 @@ low_light/jpeg severity pairs, per-stage/per-block CKA + proxy profiles.
 - Baselines: TENT, BN-adapt (adapt-all), enhancement front-ends (ZeroDCE/CLAHE),
   augmentation-only FT. Ablations: proxy-vs-CKA profiler, top-k vs all, gate on/off.
 - This is the cheapest method arm and the one that makes the framework "label-free".
+- Status: S1 smoke done 2026-10-14 (gate + selection hold, repair harmful —
+  RESEARCH §6.7); S2 attachment-point probe run 2026-10-15 (SSR_PLAN §7.2):
+  scope flips the outcome (ResNet stream **+4.3** sev5, ViT sublayer −1.4) —
+  artifact confirmed substantially, mechanism stands (RESEARCH §6.8);
+  S3 replication grid run 2026-10-15 (SSR_PLAN §7.3): **32/32 legs, ~35 min**
+  (3 seeds × {low_light, jpeg} × ladder + k-matched control) — ResNet stream
+  low_light sev5 **+5.1±0.8** and jpeg +4.1±2.4 replicate, sublayer harm
+  confirmed (−32.8±1.2), every ViT cell noise-level (the seed-42-only +0.8
+  fails to replicate), TENT flat, identity 32/32 (RESEARCH §6.9).
+  S4 6-model-grid harness landed 2026-10-15 (SSR_PLAN §7.4): ConvNeXt/Swin
+  stage-scope patterns, DINOv2 CIFAR-10 frozen-probe protocol, the
+  `dedup_selected` fix (the dedup ablation), `ssr_s4.sh` 68-leg grid + kernel
+  `ssr-s4`; T4 run + verdict pending.
 
 ### Track 5 — Real-darkness dense eval (the credibility arm; ~3–5 GPU-hours)
 - ACDC night + Dark Zurich (segmentation, eval-only with a frozen SegFormer/DeepLab
@@ -274,7 +313,73 @@ Next up, in order:
    RESEARCH §6.5. Re-harvest: `kaggle kernels output arindamtripathi/vitb-lora-v9 -p <dir>`.
    Open follow-ups: sublayer-resolved ranks only (§1.4 shape ablations closed
    2026-10-11 — kernel `vitb-lora-abl`, RESEARCH §6.6).
-6. **Track 3** — cross-family atlas; the harness is now shared and model-agnostic
-   (`run_drift_proxy.py` / `run_drift_profile.py`).
+6. [x] **Track 3** — cross-family atlas **DONE 2026-10-14** (kernel `drift-atlas-v4`,
+   T4, 46 min, `fail=0`; artifacts `output/profiles/` + `output/atlas/`; verdict
+   RESEARCH §5.2 / DPA_DESIGN §2). Harness stayed the shared model-agnostic pair
+   (`run_drift_proxy.py` / `run_drift_profile.py`) — no new profiler code needed.
+7. [x] **Track 4 SSR runner + S1 smoke** — `run_ssr.py` **landed 2026-10-14**
+   (torch arms; consumes the atlas CSVs per SSR_PLAN §8/§10; 8 arms incl.
+   TENT/AQR/BN-stat/CLAHE; per-run C2 identity check; CPU smoke green on both
+   BN/conv and LN/token paths). **S1 T4 smoke DONE 2026-10-14** (kernel
+   `arindamtripathi/ssr-s1`, ResNet-50 + ViT-S × low_light/jpeg × sev 1+5,
+   real ImageNet-val, 34 min, all legs rc=0, identity bit-identical both
+   families): C1–C4 hold (selectivity and gate both do real work) but the
+   moment-matching repair is net-harmful at every open gate — TENT is the
+   only arm that never loses, CLAHE is the one large positive (ViT-S
+   low_light sev5 +22.3). Verdict RESEARCH §6.7; artifacts `output/ssr/`.
+   Decision → item 8 (attachment-point probe, not the full grid).
 7. [x] Optional: deterministic-noise follow-up (Track 0 residual; non-blocking) —
    closed 2026-10-09 by agreement, `docs/DIVERGENCE_REPORT.md` §8.5.
+8. [x] **Track 4 S2 attachment-point probe** — decided + run 2026-10-15:
+   probe *where* the repair attaches (SSR_PLAN §7.2) before writing off the
+   mechanism; full 6-model grid deferred to S3, probe-gated. **Harness landed
+   2026-10-15**: `--attach {profiled,stream,sublayer,norm}` on `run_ssr.py`
+   (torch-free scope logic in `src/ssr.py` — scope owns hook modules +
+   selection rows; norm rows borrow their sublayer's drift rank; `blocks`
+   container excluded from `stream` to prevent a double affine), driver
+   `scripts/kaggle/ssr_s2.sh` (7 legs: ResNet-50 {profiled,sublayer,stream} +
+   ViT-S {profiled,sublayer,stream,norm}, low_light, 4 arms →
+   `output/ssr_s2/`), kernel variant `ssr_s2` (`arindamtripathi/ssr-s2`,
+   verifier-naming regression test mirrored). 47/47 tests; CPU smoke green
+   on all 6 scope legs (identity bit-identical each).
+   **Run DONE 2026-10-15** (kernel `arindamtripathi/ssr-s2` v1, T4, 601 s,
+   `SSR_S2_COMPLETE`, 7/7 rc=0, identity 7/7, artifacts `output/ssr_s2/` +
+   `output/ssr_s2_marks.log`): scope flips the outcome — ResNet `stream`
+   (k=1, `layer4`) **+4.3 sev5** vs profiled −32.8; ViT `sublayer` −1.4 vs
+   profiled −9.0; profiled legs reproduce S1 bit-close (cross-session
+   parity).   **Verdict: attachment-point artifact confirmed substantially —
+   mechanism not written off** (RESEARCH §6.8, METHODS §7.12). Next: S3
+   replication (seeds × jpeg × severity ladder + k-matched and
+   deduplicated-profiled ablations), then the 6-model grid.
+9. [x] **Track 4 S3 replication grid** — run + verdict 2026-10-15
+   (SSR_PLAN §7.3, RESEARCH §6.9, METHODS §7.13): `stream`/`sublayer` ×
+   seeds {42,43,44} × {low_light, jpeg} × sev {1,5} + k-matched
+   (ResNet top-1 / ViT top-3) control at seed 42 — driver
+   `scripts/kaggle/ssr_s3.sh`, kernel `arindamtripathi/ssr-s3` (fresh slug),
+   aggregator `scripts/analyze_ssr_s3.py` (committed results of record:
+   `output/ssr_s3/` + `output/ssr_s3_marks.log`), 48/48 tests.
+   **All 32/32 legs rc=0 in ~35 min, identity bit-identical 32/32.**
+   ResNet `stream` low_light sev5 **+5.1±0.8** / jpeg +4.1±2.4 replicate
+   across seeds (seed 42 = S2's +4.3, bit-exact parity); ResNet `sublayer`
+   stays harmful (−32.8±1.2 / −24.0±1.6); every ViT cell noise-level —
+   the seed-42-only jpeg +0.8 fails to replicate. K-matched: sublayer k=1
+   rescues (+4.3 vs k25 −32.2) → the extra mid/early rows carry the harm.
+   **Verdict: replication, not rescue; roster = 2 positives** (CLAHE@ViT-S
+   low_light sev5, SSR-stream@ResNet-50 low_light sev5). Next:
+   deduplicated-profiled ablation + the 4 remaining models.
+10. [x] **Track 4 S4 6-model-grid harness** — landed 2026-10-15
+   (SSR_PLAN §7.4; run pending). Extends the stream/sublayer replication to
+   the 4 remaining atlas models — ConvNeXt-T, Swin-T, DeiT-S, DINOv2-ViT-B/14
+   — and resolves the dedup ablation in the same grid. Changes:
+   (a) `src/ssr.py` scope patterns gain `stages.\d+`/`layers.\d+` (stream) and
+   `stages.\d+.blocks|downsample`/`layers.\d+.blocks|downsample` (sublayer) for
+   the hierarchical stage models (duplicate-free; DeiT/DINOv2 reuse ViT
+   patterns + `norm`); (b) `run_ssr.py --dataset cifar10` runs DINOv2 on the
+   frozen-probe protocol (no ImageNet head), + `dedup_selected` drops
+   same-tensor container/child pairs so the affine applies once per tensor;
+   (c) driver `scripts/kaggle/ssr_s4.sh` (**68 legs** = stream/sublayer(/norm
+   for DeiT+DINOv2) × {low_light,jpeg} × seeds{42,43,44} @k25 + a
+   profiled-dedup control per model @seed42) + kernel `ssr_s4`
+   (`arindamtripathi/ssr-s4`, exit verifier mirrors the driver). 51/51 tests;
+   CPU smoke green on all 4 new models incl. DINOv2-cifar10. **Next: T4 run +
+   harvest + verdict (RESEARCH §6.10 / METHODS §7.14).**

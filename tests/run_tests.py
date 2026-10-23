@@ -15,10 +15,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.analysis import (benjamini_hochberg, bootstrap_accuracy_ci, curve_permutation_test,
                           linear_cka_unbiased, paired_permutation_test, participation_ratio)
+from tools.build_atlas import late_half_mass, normalize_depth, read_profile_csv
 from src.corruptions import (BRIGHTNESS_FACTORS, clahe_enhance, gamma_correct, high_pass,
                              low_light, low_light_stage1, low_pass, quantization_gap_truth,
                              simple_gain)
 from src.probes import NTrainableProbe, stratified_split
+from src.aqr import apply_aqr, apply_quantile_map, fit_channel_quantiles
+from src.ssr import (SCOPE_CHOICES, aggregate_distances, apply_affine, channel_axis_for,
+                     channel_stats, fit_gate, gate_open, looks_channels_last,
+                     map_scope_rows, module_in_scope, moment_affine, moment_distance,
+                     pool_stats, recalibrate, select_topk, select_topk_fraction)
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +433,655 @@ def test_exp_cross_dataset_end_to_end_stubbed():
             summary = _json.load(f)
         assert summary["n_stl10_used"] == 9, summary
         assert summary["n_skipped_monkey"] == 2, summary
+
+
+# ---------------------------------------------------------------------------
+# Track 3 atlas tooling (pure-math invariants the Fig. 1 claims rest on)
+# ---------------------------------------------------------------------------
+
+def test_normalize_depth_rank_axis():
+    """Normalized depth must span [0, 1] inclusive, be strictly increasing,
+    and stay well-defined for degenerate module counts."""
+    d4 = normalize_depth(4)
+    assert d4[0] == 0.0 and d4[-1] == 1.0, d4
+    assert np.all(np.diff(d4) > 0), d4
+    assert np.isclose(d4[1] - d4[0], d4[-1] - d4[-2]), d4
+    assert normalize_depth(1).tolist() == [0.0]
+    try:
+        normalize_depth(0)
+        assert False, "n_modules=0 must raise"
+    except ValueError:
+        pass
+
+
+def test_late_half_mass_directionality():
+    """The atlas' headline statistic must rank profiles the way its name
+    claims: late-heavy > uniform > early-heavy, and NaN on a zero profile."""
+    late = late_half_mass([0.01, 0.01, 0.1, 0.4])     # mass in deep half
+    flat = late_half_mass([0.1, 0.1, 0.1, 0.1])
+    early = late_half_mass([0.4, 0.1, 0.01, 0.01])
+    assert late > flat > early, (late, flat, early)
+    assert np.isclose(flat, 0.5), flat
+    # odd n: the late half is the ceil(n/2) deepest modules
+    assert np.isclose(late_half_mass([0.0, 1.0, 1.0]), 1.0)
+    assert np.isnan(late_half_mass([0.0, 0.0])), "zero-drift profile has no 'where'"
+
+
+def test_read_profile_csv_roundtrip(tmp_path=None):
+    """The atlas reader must consume the exact schema write_drift_profile_csvs
+    emits (layer,severity,module,cka,cka_unbiased,drop_from_clean,
+    cka_unbiased_drop), preserving forward order."""
+    import csv as _csv
+    import tempfile
+    schema = ["layer", "severity", "module", "cka", "cka_unbiased",
+              "drop_from_clean", "cka_unbiased_drop"]
+    rows_in = [
+        {"layer": 0, "severity": 5, "module": "blocks.0", "cka": 0.9,
+         "cka_unbiased": 0.89, "drop_from_clean": 0.1, "cka_unbiased_drop": 0.11},
+        {"layer": 1, "severity": 5, "module": "blocks.1", "cka": 0.3,
+         "cka_unbiased": 0.28, "drop_from_clean": 0.7, "cka_unbiased_drop": 0.72},
+    ]
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "drift_profile_sev5_low_light.csv")
+        with open(path, "w", newline="") as f:
+            w = _csv.DictWriter(f, fieldnames=schema)
+            w.writeheader()
+            w.writerows(rows_in)
+        rows = read_profile_csv(path)
+    assert [r["module"] for r in rows] == ["blocks.0", "blocks.1"], rows
+    assert rows[1]["drop_from_clean"] == 0.7, rows
+    assert rows[0]["layer"] == 0 and rows[1]["severity"] == 5, rows
+
+
+# ---------------------------------------------------------------------------
+# Track 4 SSR core (pure-math invariants the C1/C2 claims rest on)
+# ---------------------------------------------------------------------------
+
+def test_ssr_channel_stats_and_pooling():
+    """Per-channel stats must reduce over all non-channel axes, and pooling
+    batch stats must equal stats of the concatenated stream (population var)."""
+    rng = np.random.default_rng(0)
+    a = rng.normal(2.0, 3.0, (4, 5, 6))
+    b = rng.normal(-1.0, 1.5, (7, 5, 6))
+    m, s = channel_stats(a, channel_axis=1)
+    assert m.shape == s.shape == (5,), (m.shape, s.shape)
+    assert np.allclose(m, a.mean(axis=(0, 2)))
+    pairs_a, pairs_b = channel_stats(a), channel_stats(b)
+    pm, ps = pool_stats([pairs_a, pairs_b], weights=[len(a), len(b)])
+    allx = np.concatenate([a, b], axis=0)
+    am, as_ = channel_stats(allx)
+    assert np.allclose(pm, am) and np.allclose(ps, as_, atol=1e-9), (pm, am)
+    try:
+        pool_stats([])
+        assert False, "empty pool must raise"
+    except ValueError:
+        pass
+
+
+def test_ssr_moment_affine_maps_test_onto_clean():
+    """C3 core: the closed-form affine must exactly transport test moments
+    onto clean moments (for scale shifts inside the clip range)."""
+    rng = np.random.default_rng(1)
+    clean = rng.normal(0.5, 2.0, (32, 8, 4, 4))
+    shift = rng.uniform(-2.0, 2.0, 8)
+    scale = rng.uniform(0.5, 2.0, 8)
+    test = clean * scale[None, :, None, None] + shift[None, :, None, None]
+    clean_stats = channel_stats(clean, channel_axis=1)
+    test_stats = channel_stats(test, channel_axis=1)
+    a, b = moment_affine(clean_stats, test_stats)
+    out = apply_affine(test, a, b, channel_axis=1)
+    om, os_ = channel_stats(out, channel_axis=1)
+    assert np.allclose(om, clean_stats[0], atol=1e-9), (om, clean_stats[0])
+    assert np.allclose(os_, clean_stats[1], atol=1e-9), (os_, clean_stats[1])
+    assert out.dtype == test.dtype, "affine must preserve activation dtype"
+
+
+def test_ssr_moment_affine_clips_extreme_scale():
+    """Guard against division blow-up: scale ratio is clamped to [1/clip, clip]."""
+    clean = (np.zeros(4), np.ones(4))
+    test = (np.zeros(4), np.full(4, 100.0))
+    a, b = moment_affine(clean, test, clip=4.0)
+    assert np.all(a == 0.25), a
+    a2, _ = moment_affine((np.zeros(4), np.full(4, 100.0)),
+                           (np.zeros(4), np.full(4, 10.0)), clip=4.0)
+    assert np.all(a2 == 4.0), a2
+
+
+def test_ssr_gate_identity_on_clean():
+    """C2 core: gate closes on clean-calibrated distances, and a closed gate
+    returns the *same array object* — bit-identity by construction."""
+    rng = np.random.default_rng(2)
+    clean_pairs = [channel_stats(rng.normal(0, 1, (16, 6, 3, 3))) for _ in range(5)]
+    clean_mean, clean_std = pool_stats(clean_pairs)
+    dists = [moment_distance((clean_mean, clean_std), p) for p in clean_pairs]
+    thr = fit_gate(dists, quantile=1.0)
+    assert thr > 0
+    fresh = channel_stats(rng.normal(0, 1, (16, 6, 3, 3)))
+    assert not gate_open(moment_distance((clean_mean, clean_std), fresh), thr), \
+        "clean input must stay under the max-clean threshold"
+    a, b = moment_affine((clean_mean, clean_std), fresh)
+    x = rng.normal(0, 1, (4, 6, 3, 3)).astype(np.float32)
+    out = recalibrate(x, a, b, open_gate=False)
+    assert out is x, "closed gate must return the input object untouched"
+    out2 = recalibrate(x, a, b, open_gate=True)
+    assert out2 is not x and out2.dtype == np.float32
+
+
+def test_ssr_gate_opens_on_shifted():
+    """C3 core: a scale/shift shift far outside clean calibration must exceed
+    the threshold."""
+    rng = np.random.default_rng(3)
+    clean_pairs = [channel_stats(rng.normal(0, 1, (16, 6, 4, 4))) for _ in range(5)]
+    clean_mean, clean_std = pool_stats(clean_pairs)
+    thr = fit_gate([moment_distance((clean_mean, clean_std), p) for p in clean_pairs])
+    shifted = channel_stats(0.25 * rng.normal(0, 1, (16, 6, 4, 4)) - 3.0)
+    d = moment_distance((clean_mean, clean_std), shifted)
+    assert gate_open(d, thr), (d, thr)
+    try:
+        fit_gate([])
+        assert False, "empty calibration must raise"
+    except ValueError:
+        pass
+
+
+def test_ssr_select_topk_membership_and_order():
+    """C1 core: selection picks the k largest drift rows, ties break to the
+    earlier module, output keeps forward order, k clamps at the row count."""
+    rows = [
+        {"module": "blocks.0", "cka_unbiased_drop": 0.10},
+        {"module": "blocks.1", "cka_unbiased_drop": 0.55},
+        {"module": "blocks.2", "cka_unbiased_drop": 0.55},
+        {"module": "blocks.3", "cka_unbiased_drop": 0.90},
+        {"module": "blocks.4", "cka_unbiased_drop": 0.30},
+    ]
+    sel = select_topk(rows, 2)
+    assert [r["module"] for r in sel] == ["blocks.1", "blocks.3"], sel
+    sel1 = select_topk(rows, 1)
+    assert [r["module"] for r in sel1] == ["blocks.3"]
+    assert [r["module"] for r in select_topk(rows, 99)] == [r["module"] for r in rows]
+    assert select_topk(rows, 0) == []
+    for r in select_topk(rows, 3):
+        assert r in rows
+    try:
+        select_topk(rows, -1)
+        assert False, "negative k must raise"
+    except ValueError:
+        pass
+
+
+def test_ssr_attach_scope_module_membership():
+    """S2 scopes (SSR_PLAN §7.2): full-match membership over timm-ViT /
+    torchvision-ResNet names. The ViT `blocks` container must be stream-
+    FALSE — its output tensor *is* blocks.11's (Sequential returns the last
+    child), so selecting both would apply the moment affine twice to one
+    value; `avgpool` (readout) is out of the stream too."""
+    assert module_in_scope("anything", "profiled")
+    assert module_in_scope("patch_embed", "profiled")
+    assert module_in_scope("blocks.11", "stream")
+    assert module_in_scope("layer4", "stream")
+    assert not module_in_scope("blocks", "stream")
+    assert not module_in_scope("blocks.11.attn", "stream")
+    assert not module_in_scope("avgpool", "stream")
+    assert not module_in_scope("layer4.2.downsample", "stream")
+    assert module_in_scope("blocks.6.attn", "sublayer")
+    assert module_in_scope("blocks.6.mlp", "sublayer")
+    assert module_in_scope("layer3.4", "sublayer")
+    assert not module_in_scope("blocks.6", "sublayer")
+    assert not module_in_scope("blocks.6.norm1", "sublayer")
+    assert not module_in_scope("layer3.4.downsample", "sublayer")
+    assert module_in_scope("blocks.0.norm1", "norm")
+    assert module_in_scope("blocks.11.norm2", "norm")
+    assert not module_in_scope("blocks.0.attn", "norm")
+    assert not module_in_scope("layer3.4.bn1", "norm")
+    assert not module_in_scope("layer3", "norm")
+    try:
+        module_in_scope("blocks.0", "pre_norm")
+        assert False, "unknown scope must raise"
+    except ValueError:
+        pass
+
+
+def test_ssr_scope_row_mapping_and_k_policy():
+    """map_scope_rows keeps S1 semantics for profiled (rows unchanged),
+    filters to the scope for stream/sublayer (k = top-25% counts the
+    scope's rows), and aliases norm rows to the sublayer they feed
+    (norm1 <- attn, norm2 <- mlp) because the atlas does not hook norm
+    layers."""
+    def row(m, d):
+        return {"module": m, "cka_unbiased_drop": d}
+
+    rows = [row("patch_embed", 0.11), row("blocks", 0.12),
+            row("blocks.0.attn", 0.20), row("blocks.0.mlp", 0.30),
+            row("blocks.1", 0.90), row("blocks.11", 0.95),
+            row("avgpool", 0.05)]
+    prof = map_scope_rows(rows, "profiled")
+    assert prof == rows and prof is not rows, "profiled must copy, not filter"
+    stream = [r["module"] for r in map_scope_rows(rows, "stream")]
+    assert stream == ["blocks.1", "blocks.11"], stream
+    sub = [r["module"] for r in map_scope_rows(rows, "sublayer")]
+    assert sub == ["blocks.0.attn", "blocks.0.mlp"], sub
+    norm = [r["module"] for r in map_scope_rows(rows, "norm")]
+    assert norm == ["blocks.0.norm1", "blocks.0.norm2"], norm
+
+    vit_stream = [row(f"blocks.{i}", 0.01 * i) for i in range(12)]
+    sel = select_topk_fraction(map_scope_rows(vit_stream, "stream"), 0.25)
+    assert [r["module"] for r in sel] == ["blocks.9", "blocks.10", "blocks.11"], sel
+    rn = [row("layer1", 0.1), row("layer1.0", 0.9),
+          row("layer1.0.downsample", 0.8), row("layer2", 0.2),
+          row("avgpool", 0.3)]
+    sel_s = select_topk_fraction(map_scope_rows(rn, "stream"), 0.25)
+    assert [r["module"] for r in sel_s] == ["layer2"], sel_s
+    sel_b = select_topk_fraction(map_scope_rows(rn, "sublayer"), 0.25)
+    assert [r["module"] for r in sel_b] == ["layer1.0"], sel_b
+    try:
+        map_scope_rows(rows, "nope")
+        assert False, "unknown scope must raise"
+    except ValueError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# AQR baseline (quantile-transport invariants; SSR_PLAN §3/§6)
+# ---------------------------------------------------------------------------
+
+def test_aqr_fit_quantiles_shape_and_order():
+    """Quantiles must come back (101, C), non-decreasing along q=0..100 for
+    every channel, over all non-channel axes."""
+    rng = np.random.default_rng(4)
+    x = rng.normal(0, 1, (5, 7, 3, 3))
+    q = fit_channel_quantiles(x, channel_axis=1)
+    assert q.shape == (101, 7), q.shape
+    assert np.all(np.diff(q, axis=0) >= 0), "quantiles must be non-decreasing"
+    q2 = fit_channel_quantiles(rng.normal(0, 1, (6, 4)), channel_axis=-1)
+    assert q2.shape == (101, 4) and np.all(np.diff(q2, axis=0) >= 0)
+
+
+def test_aqr_identity_when_distributions_match():
+    """When test quantiles equal source quantiles the transport must be the
+    identity (within float round-off) — the baseline must not distort clean
+    batches it was fit on."""
+    rng = np.random.default_rng(5)
+    x = rng.normal(0, 1, (16, 6, 4, 4))
+    q = fit_channel_quantiles(x, channel_axis=1)
+    out = apply_aqr(x, q, q, channel_axis=1)
+    assert np.allclose(out, x, atol=1e-9), float(np.max(np.abs(out - x)))
+    assert out.shape == x.shape and out.dtype == x.dtype
+
+
+def test_aqr_maps_test_quantiles_to_source():
+    """The map must send each target quantile node to its source counterpart:
+    quantile alignment is the method's defining property."""
+    rng = np.random.default_rng(6)
+    source = rng.normal(0.0, 1.0, (64, 5))
+    target = rng.normal(4.0, 3.0, (64, 5))
+    s_q = fit_channel_quantiles(source, channel_axis=1)
+    t_q = fit_channel_quantiles(target, channel_axis=1)
+    out = apply_quantile_map(t_q, s_q, t_q)
+    assert np.allclose(out, s_q, atol=1e-6), float(np.max(np.abs(out - s_q)))
+
+
+def test_aqr_clamps_out_of_range_and_validates_shapes():
+    """Values beyond the target range clamp to the source tails; mismatched
+    quantile shapes or channel counts raise."""
+    s_q = np.tile(np.linspace(0.0, 1.0, 101)[:, None], (1, 2))
+    t_q = np.tile(np.linspace(0.0, 10.0, 101)[:, None], (1, 2))
+    x = np.array([[-5.0, 0.5], [15.0, 9.5]])
+    out = apply_quantile_map(x, s_q, t_q)
+    assert np.allclose(out[:, 0], [0.0, 1.0]), out
+    assert np.allclose(out[:, 1], [0.05, 0.95]), out
+    for bad in (lambda: apply_quantile_map(x, s_q, t_q[:-1]),
+                lambda: apply_quantile_map(x[:, :1], s_q, t_q)):
+        try:
+            bad()
+            assert False, "shape mismatch must raise"
+        except ValueError:
+            pass
+
+
+def test_channel_axis_resolution():
+    """The SSR affine must act on the channel axis of every roster layout:
+    channels-first conv (B,C,H,W), channels-last Swin (B,H,W,C), token
+    sequences (B,S,D) and pooled vectors (B,D) — the four shapes the 2026-10-14
+    probe observed across the six atlas families."""
+    assert channel_axis_for((2, 256, 56, 56), channels_last=False) == 1
+    assert channel_axis_for((2, 56, 56, 96), channels_last=True) == 3
+    assert channel_axis_for((2, 197, 384)) == 2
+    assert channel_axis_for((2, 384)) == 1
+    try:
+        channel_axis_for((2,))
+        assert False, "rank-1 must raise"
+    except ValueError:
+        pass
+    # disambiguation: H==W in both layouts; the odd dim is the channel dim
+    assert looks_channels_last((2, 96, 56, 56)) is False   # ConvNeXt stem
+    assert looks_channels_last((2, 56, 56, 96)) is True    # Swin patch_embed
+    assert looks_channels_last((2, 7, 7, 768)) is True     # Swin deep stage
+    assert looks_channels_last((2, 2048, 7, 7)) is False   # ResNet layer4
+
+
+def test_aggregate_distances_is_rms_over_modules():
+    """The gate's shift statistic must be the RMS over per-module distances
+    (SSR_PLAN §5), not max/mean — ordering-preserving and scale-faithful."""
+    assert np.isclose(aggregate_distances([3.0, 4.0]), 5.0 / np.sqrt(2))
+    assert np.isclose(aggregate_distances([0.5]), 0.5)
+    try:
+        aggregate_distances([])
+        assert False, "empty module set must raise"
+    except ValueError:
+        pass
+
+
+def test_select_topk_fraction_policy():
+    """Primary SSR selection policy: k = max(1, round(25% * n)), membership by
+    drift rank, forward order preserved in the output."""
+    rows = [{"module": f"m{i}", "cka_unbiased_drop": d}
+            for i, d in enumerate([0.01, 0.9, 0.2, 0.8, 0.7, 0.05, 0.6, 0.5])]
+    sel = select_topk_fraction(rows, 0.25)
+    assert [r["module"] for r in sel] == ["m1", "m3"], sel
+    sel1 = select_topk_fraction(rows[:3], 0.25)   # n=3 -> k=1
+    assert [r["module"] for r in sel1] == ["m1"], sel1
+    sel_all = select_topk_fraction(rows[:2], 1.0)
+    assert len(sel_all) == 2
+    try:
+        select_topk_fraction(rows, 0.0)
+        assert False, "fraction=0 must raise"
+    except ValueError:
+        pass
+
+
+def test_agreement_report_dataset_label():
+    """The report header must name the dataset actually profiled (bug of
+    2026-10-14: the txt line hardcoded 'CIFAR-10 test', mislabeling the six
+    Track-3 ImageNet agreement reports; the JSON meta was always right).
+    Renders from the torch-free agreement_report module (run_drift_proxy
+    imports torch at module scope, so CI cannot import it) and checks the
+    runner still re-exports that exact writer."""
+    import re
+    import tempfile
+
+    import agreement_report as rdp
+
+    rows = [{"layer": i, "severity": 5, "module": f"m{i}",
+             "energy_drop": 0.1, "mean_shift": 0.1, "cov_shift": 0.1,
+             "cos_drop": 0.1, "cka_unbiased": 0.9, "cka_unbiased_drop": 0.1}
+            for i in range(2)]
+    agreement = {k: {"spearman_rho": 0.5, "spearman_p": 0.1,
+                     "topk_containment": {1: 1.0}} for k in rdp.PROXY_KEYS}
+    gate = {"gate_criterion": "rho >= 0.8 on >= 2 corruptions",
+            "per_proxy": {k: {"rho": {"c": 0.5}, "containment_at_k": {"c": 1.0},
+                              "k": 1} for k in rdp.PROXY_KEYS},
+            "best_proxy": "cos_drop", "verdict": "NO-GO"}
+    base_meta = {"model": "x", "model_desc": "x", "device": "cpu",
+                 "torch_version": "0", "n_images": 10, "seed": 42,
+                 "severity": "5", "corruptions": ["c"], "n_modules": 2}
+
+    def render(meta_extra):
+        meta = dict(base_meta, **meta_extra)
+        with tempfile.TemporaryDirectory() as td:
+            rdp.write_agreement_report({"c@sev5": rows},
+                                       {"c@sev5": agreement}, gate, meta, td)
+            with open(os.path.join(td, "agreement_report.txt")) as f:
+                return f.read()
+
+    txt_imagenet = render({"dataset": "imagenet"})
+    assert "10 ImageNet-val extract, seed 42" in txt_imagenet, txt_imagenet
+    assert "CIFAR-10" not in txt_imagenet
+    # default (proxy runner has no --dataset flag) keeps the legacy CIFAR label
+    assert "10 CIFAR-10 test, seed 42" in render({})
+
+    proxy_src = open("run_drift_proxy.py").read()
+    m = re.search(r"^from agreement_report import (.+)$", proxy_src, re.M)
+    names = {n.strip() for n in m.group(1).split(",")} if m else set()
+    assert {"PROXY_KEYS", "write_agreement_report"} <= names, (
+        "run_drift_proxy must re-export the tested writer so the runner and "
+        f"this test exercise the same code; found: {m.group(0) if m else None!r}")
+
+    kb_src = open("scripts/build_kaggle_kernel.py").read()
+    for manifest in re.findall(r"_SOURCES = \{(.*?)\n\}", kb_src, re.S):
+        if '"run_drift_proxy.py"' in manifest:
+            assert '"agreement_report.py"' in manifest, (
+                "every kernel manifest shipping run_drift_proxy.py must also "
+                "ship agreement_report.py or the remote kernel dies on import")
+
+
+def test_ssr_kernel_verifier_matches_driver_dir_names():
+    """The S1 kernel's exit verifier checks for per-invocation result dirs by
+    name. Bug of 2026-10-14: it hardcoded 'vit_small_patch16_224_*' while
+    scripts/kaggle/ssr.sh builds dirs from the model slug with ':' -> '_',
+    producing 'timm_vit_small_patch16_224_*' — the fully successful S1 run
+    (all 4 invocations rc=0, identity bit-identical) was misreported as
+    SSR_S1_FAILED. The verifier's names must be derived from the driver's
+    (slug, corruption) pairs, not restated."""
+    import re
+
+    sh = open("scripts/kaggle/ssr.sh").read()
+    slugs = re.findall(r'run_invocation "([^"]+)"', sh)
+    assert slugs, "no run_invocation calls found in ssr.sh"
+    m_corr = re.search(r"for corr in ([\w_ ]+); do", sh)
+    assert m_corr, "ssr.sh corruption loop not found"
+    corruptions = m_corr.group(1).split()
+    expected = {f"{s.replace(':', '_')}_{c}" for s in slugs for c in corruptions}
+
+    src = open("scripts/build_kaggle_kernel.py").read()
+    m_inv = re.search(r"invocations = \[(.*?)\]", src, re.S)
+    assert m_inv, "kernel verifier invocations list not found"
+    namespace = {}
+    exec("invocations = [" + m_inv.group(1) + "]", namespace)
+    got = set(namespace["invocations"])
+    assert got == expected, (
+        f"verifier checks {sorted(got)}; driver creates {sorted(expected)}")
+
+
+def test_ssr_s2_kernel_verifier_matches_driver_dir_names():
+    """S2 mirror of the S1 naming-bug test: the ssr_s2 kernel's exit
+    verifier must derive its result-dir names from the driver's
+    (slug, scope) legs (output/ssr_s2/<slug_safe>_<scope>_low_light/),
+    and every scope the driver runs must be a scope run_ssr.py accepts
+    (--attach choices = src.ssr.SCOPE_CHOICES)."""
+    import re
+
+    sh = open("scripts/kaggle/ssr_s2.sh").read()
+    assert "--attach" in sh, "S2 driver must pass --attach to run_ssr.py"
+    expected, scopes_seen = set(), set()
+    for scopes_str, body in re.findall(r"for scope in ([\w ]+); do(.*?)done",
+                                       sh, re.S):
+        slugs = re.findall(r'run_invocation "([^"]+)"', body)
+        assert slugs, f"no run_invocation calls under 'for scope in {scopes_str}'"
+        for slug in slugs:
+            for sc in scopes_str.split():
+                scopes_seen.add(sc)
+                expected.add(f"{slug.replace(':', '_')}_{sc}_low_light")
+    assert expected, "no legs parsed from ssr_s2.sh"
+    assert scopes_seen <= set(SCOPE_CHOICES), (scopes_seen, SCOPE_CHOICES)
+
+    src = open("scripts/build_kaggle_kernel.py").read()
+    m_blk = re.search(r"SSR_S2_TEMPLATE = '''(.*?)'''", src, re.S)
+    assert m_blk, "SSR_S2_TEMPLATE not found in the kernel builder"
+    m_inv = re.search(r"invocations = \[(.*?)\]", m_blk.group(1), re.S)
+    assert m_inv, "S2 verifier invocations list not found"
+    namespace = {}
+    exec("invocations = [" + m_inv.group(1) + "]", namespace)
+    got = {f"{s.replace(':', '_')}_{sc}_low_light"
+           for s, sc in namespace["invocations"]}
+    assert got == expected, (
+        f"verifier checks {sorted(got)}; driver creates {sorted(expected)}")
+
+
+def test_ssr_s3_kernel_verifier_matches_driver_dir_names():
+    """S3 mirror of the S1/S2 naming-bug tests: the ssr_s3 kernel's exit
+    verifier must derive its result-dir names from the driver's LEGS
+    array (output/ssr_s3/<slug_safe>_<scope>_k<k>_<corr>_s<seed>/). Every
+    scope must be one run_ssr.py accepts (--attach choices), and the grid
+    must cover the replication axes S3-r1 claims: {stream, sublayer} x
+    {low_light, jpeg} x seeds {42,43,44} at k=25, plus k-matched controls."""
+    import re
+
+    sh = open("scripts/kaggle/ssr_s3.sh").read()
+    assert "--attach" in sh, "S3 driver must pass --attach to run_ssr.py"
+    m_legs = re.search(r"LEGS=\((.*?)\n\)", sh, re.S)
+    assert m_legs, "S3 driver LEGS array not found"
+    legs = re.findall(r'"(\S+) (\S+) (\S+) (\d+) (\d+)"', m_legs.group(1))
+    assert legs, "no legs parsed from ssr_s3.sh LEGS"
+    scopes = {sc for _, sc, _, _, _ in legs}
+    assert scopes <= set(SCOPE_CHOICES), (scopes, SCOPE_CHOICES)
+    expected = {f"{s.replace(':', '_')}_{sc}_k{k}_{c}_s{sd}"
+                for s, sc, c, sd, k in legs}
+    primary = {(s, sc, c, sd) for s, sc, c, sd, k in legs if k == "25"}
+    for corr in ("low_light", "jpeg"):
+        for sd in ("42", "43", "44"):
+            for s in ("resnet50", "timm:vit_small_patch16_224"):
+                for sc in ("stream", "sublayer"):
+                    assert (s, sc, corr, sd) in primary, \
+                        f"missing replication leg {s} {sc} {corr} seed {sd}"
+    assert any(k != "25" for _, _, _, _, k in legs), \
+        "no k-matched control legs in S3 grid"
+
+    src = open("scripts/build_kaggle_kernel.py").read()
+    m_blk = re.search(r"SSR_S3_TEMPLATE = '''(.*?)'''", src, re.S)
+    assert m_blk, "SSR_S3_TEMPLATE not found in the kernel builder"
+    m_inv = re.search(r"invocations = \[(.*?)\]", m_blk.group(1), re.S)
+    assert m_inv, "S3 verifier invocations list not found"
+    namespace = {}
+    exec("invocations = [" + m_inv.group(1) + "]", namespace)
+    got = {f"{s.replace(':', '_')}_{sc}_k{k}_{c}_s{sd}"
+           for s, sc, c, sd, k in namespace["invocations"]}
+    assert got == expected, (
+        f"verifier checks {len(got)} dirs; driver creates {len(expected)}; "
+        f"symmetric difference {sorted(got ^ expected)}")
+
+
+def test_ssr_scope_patterns_cover_all_atlas_models():
+    """The attachment-scope patterns (src/ssr.py) must resolve non-empty,
+    duplicate-free row sets for every atlas model's committed severity-5
+    profile, including the two hierarchical stage models added for S4
+    (ConvNeXt -> `stages.N`, Swin -> `layers.N`). DeiT/DINOv2 are ViT-
+    architecture and reuse the `blocks.N` patterns; `norm` is non-empty only
+    for the ViT-arch pair (ConvNeXt/Swin profiles carry no attn/mlp rows to
+    alias from)."""
+    import csv as _csv
+    base = "output/profiles"
+    def rows(model):
+        with open(f"{base}/{model}/drift_profile_sev5_low_light.csv") as f:
+            return list(_csv.DictReader(f))
+    def mods(model, scope):
+        return [r["module"] for r in map_scope_rows(rows(model), scope)]
+
+    # ConvNeXt: stream = 4 stage outputs, sublayer = 7 within-stage rows, no norm
+    assert mods("convnext_tiny", "stream") == [
+        "stages.0", "stages.1", "stages.2", "stages.3"]
+    assert len(mods("convnext_tiny", "sublayer")) == 7
+    assert mods("convnext_tiny", "norm") == []
+    # Swin: stream = 4 layer outputs, sublayer = 7 within-stage rows, no norm
+    assert mods("swin_tiny_patch4_window7_224", "stream") == [
+        "layers.0", "layers.1", "layers.2", "layers.3"]
+    assert len(mods("swin_tiny_patch4_window7_224", "sublayer")) == 7
+    assert mods("swin_tiny_patch4_window7_224", "norm") == []
+    # DeiT / DINOv2 (ViT-arch): 12 stream, 24 sublayer, 24 norm (norm1/norm2)
+    for m in ("deit_small_patch16_224", "dinov2_vitb14"):
+        assert len(mods(m, "stream")) == 12, m
+        assert len(mods(m, "sublayer")) == 24, m
+        assert len(mods(m, "norm")) == 24, m
+    # full-match semantics: containers stay out of stream, bare stages excluded
+    assert module_in_scope("stages.1", "stream")
+    assert not module_in_scope("stages.1.blocks", "stream")
+    assert not module_in_scope("stages", "stream")
+    assert not module_in_scope("layers", "stream")
+    assert module_in_scope("stages.1.blocks", "sublayer")
+    assert module_in_scope("layers.1.downsample", "sublayer")
+
+
+def test_ssr_s4_kernel_verifier_matches_driver_dir_names():
+    """S4 mirror of the S1/S2/S3 naming-bug tests: the ssr_s4 kernel's exit
+    verifier must derive its result-dir names from the driver's LEGS array
+    (output/ssr_s4/<slug_safe>_<scope>_k<k>_<corr>_s<seed>/). Every scope
+    must be one run_ssr.py accepts, and the grid must cover the 4 remaining
+    atlas models: {convnext_tiny, swin_tiny, deit_small, dinov2_vitb14} at
+    {stream, sublayer}(/norm for the ViT-arch pair) x {low_light, jpeg} x
+    seeds{42,43,44} at k=25, plus a profiled-dedup control per model."""
+    import re
+
+    sh = open("scripts/kaggle/ssr_s4.sh").read()
+    assert "--attach" in sh, "S4 driver must pass --attach to run_ssr.py"
+    m_legs = re.search(r"LEGS=\((.*?)\n\)", sh, re.S)
+    assert m_legs, "S4 driver LEGS array not found"
+    legs = re.findall(r'"(\S+) (\S+) (\S+) (\d+) (\d+)"', m_legs.group(1))
+    assert legs, "no legs parsed from ssr_s4.sh LEGS"
+    scopes = {sc for _, sc, _, _, _ in legs}
+    assert scopes <= set(SCOPE_CHOICES), (scopes, SCOPE_CHOICES)
+    expected = {f"{s.replace(':', '_')}_{sc}_k{k}_{c}_s{sd}"
+                for s, sc, c, sd, k in legs}
+    models = {"timm:convnext_tiny", "timm:swin_tiny_patch4_window7_224",
+              "timm:deit_small_patch16_224", "dinov2_vitb14"}
+    assert {s for s, _, _, _, _ in legs} == models
+    primary = {(s, sc, c, sd) for s, sc, c, sd, k in legs if k == "25"}
+    for corr in ("low_light", "jpeg"):
+        for sd in ("42", "43", "44"):
+            for s in ("timm:convnext_tiny", "timm:swin_tiny_patch4_window7_224"):
+                for sc in ("stream", "sublayer"):
+                    assert (s, sc, corr, sd) in primary, \
+                        f"missing replication leg {s} {sc} {corr} seed {sd}"
+            for s in ("timm:deit_small_patch16_224", "dinov2_vitb14"):
+                for sc in ("stream", "sublayer", "norm"):
+                    assert (s, sc, corr, sd) in primary, \
+                        f"missing replication leg {s} {sc} {corr} seed {sd}"
+    # a profiled-dedup control leg per model, seed 42
+    profiled = {s for s, sc, c, sd, k in legs if sc == "profiled"}
+    assert profiled == models, profiled
+
+    src = open("scripts/build_kaggle_kernel.py").read()
+    m_blk = re.search(r"SSR_S4_TEMPLATE = '''(.*?)'''", src, re.S)
+    assert m_blk, "SSR_S4_TEMPLATE not found in the kernel builder"
+    m_inv = re.search(r"invocations = \[(.*?)\]", m_blk.group(1), re.S)
+    assert m_inv, "S4 verifier invocations list not found"
+    namespace = {}
+    exec("invocations = [" + m_inv.group(1) + "]", namespace)
+    got = {f"{s.replace(':', '_')}_{sc}_k{k}_{c}_s{sd}"
+           for s, sc, c, sd, k in namespace["invocations"]}
+    assert got == expected, (
+        f"verifier checks {len(got)} dirs; driver creates {len(expected)}; "
+        f"symmetric difference {sorted(got ^ expected)}")
+
+
+def test_ssr_dedup_selected_same_tensor_container():
+    """The output-identity dedup (run_ssr.dedup_selected) must drop a selected
+    container whose forward output IS a selected child's tensor (a Sequential
+    returns its last child's tensor verbatim, so `blocks` and `blocks.1` are
+    the same tensor) so the moment affine applies once per tensor — the S1
+    profiled-arm double-application caveat. A distinct-tensor module must be
+    kept. Skipped when torch is absent (CI)."""
+    try:
+        import torch
+        import torch.nn as nn
+        from run_ssr import dedup_selected
+    except ImportError:
+        return
+
+    class Block(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = nn.Conv2d(3, 3, 1)
+
+        def forward(self, x):
+            return self.conv(x)
+
+    class Net(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.stem = nn.Conv2d(3, 3, 1)      # distinct tensor
+            self.blocks = nn.Sequential(Block(), Block())  # out IS blocks.1's
+
+        def forward(self, x):
+            return self.blocks(self.stem(x))
+
+    model = Net().eval()
+    modules = {n: m for n, m in model.named_modules() if n}
+    selected = ["blocks", "blocks.1", "stem"]
+    imgs = [np.random.randint(0, 255, (32, 32, 3), dtype=np.uint8)
+            for _ in range(2)]
+    kept, dropped = dedup_selected(model, modules, selected, imgs, "cpu")
+    assert "blocks.1" in kept and "blocks" not in kept, (kept, dropped)
+    assert "stem" in kept, kept
+    assert dropped == ["blocks"], dropped
 
 
 # ---------------------------------------------------------------------------

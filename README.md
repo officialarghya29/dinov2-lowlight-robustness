@@ -27,20 +27,22 @@ linear probe accuracy     CKA drift, frequency ablation,     70% dark / 30% clea
 | Deliverable | Location | Run / Regenerate |
 |---|---|---|
 | Static website (live, Vercel-ready) | `index.html` (+ `static/gen/`) | `python3 tools/export_static_site.py` |
-| Site build source (14 sections) | `apps/presentation.py` | imported by `tools/export_static_site.py` |
+| Site build source (15 sections) | `apps/presentation.py` | imported by `tools/export_static_site.py` |
 | Internal smoke check (deterministic, no server) | `apps/presentation.py` | `PRESENTATION_SMOKE=1 python3 apps/presentation.py` |
 | Single-section static render (PNG) | `apps/presentation.py` | `PRESENTATION_STATIC=1 PRESENTATION_SECTION=<name> python3 apps/presentation.py` |
 
 `apps/presentation.py` is the build source of the website — the presentation itself now lives only as the deployed static site. It is **read-only with respect
 to results**: it reads committed artifacts (`output/`, `colab_results/`) and rebuilds charts from them
-(no new experiments). It has **14 sections with sidebar navigation**: home (story), methods, collapse, localize, mechanism, proxy gate, fix, 9-arm grid, families, readout, ExDark, ViT-B, bugs, figure gallery. The smoke check renders every one of those sections headlessly and exits non-zero if any
+(no new experiments). It has **15 sections with sidebar navigation**: home (story), methods, collapse, localize, mechanism, proxy gate, fix, 9-arm grid, families, readout, ExDark, ViT-B, SSR (label-free repair), bugs, figure gallery. The smoke check renders every one of those sections headlessly and exits non-zero if any
 fails — it erases any doubt about whether the site's source actually renders every section from committed
-data, and it can be wired into CI.
+data, and it is wired into the local CI gate (`scripts/ci_local.sh`). After changing the app, re-run
+`python3 tools/export_static_site.py` and commit the refreshed `index.html` + `static/gen/` — the smoke
+renders the source, not the deployed export, so only the re-export keeps the live site in step.
 
 ### Static website — one click to Vercel (no server)
 
 `index.html` at the repo root **is** the presentation: a server-free static site with all
-14 sections — every figure, table, expander, tab and widget state
+15 sections — every figure, table, expander, tab and widget state
 (severity sliders, estimator toggle, corruption radio) — generated from
 `apps/presentation.py` by `tools/export_static_site.py`, so source and site can never
 quietly diverge. Assets are referenced in place (`output/`, `colab_results/`), so the
@@ -235,6 +237,7 @@ The kernel hard-aborts without CUDA, mounts CIFAR-10 from a private Kaggle datas
 | `run_drift_proxy.py` | Track-1 drift-proxy harness: per-module forward-only proxies vs CKA agreement, pre-registered go/no-go gate (`output/drift_proxy/`) |
 | `run_drift_profile.py` | Severity×corruption drift-profile sweep over one clean pass (Tracks 2+3); produced the ViT-B atlas `output/vitb_profile/` |
 | `scripts/build_kaggle_kernel.py` | Builds the self-contained Kaggle kernel (base64-embedded package files + CIFAR mount + GPU guard); regenerates the v6 kernel byte-identically |
+| `scripts/ci_local.sh` | Local CI gate: reproduces the GitHub-Actions matrix (py3.10/3.11, torch-free deps via `uv`) plus native torch tests, all 9 kernel builds and the presentation smoke — one command, non-zero exit on any failure |
 | `scripts/kaggle/grid_tail.sh` | Corruption-arm chain executed inside the Kaggle kernel |
 | `run_lora_finetune_colab.py` | Phase 3 alternative using the PEFT library |
 | `dinov2_*.ipynb` | Original notebook forms of all three phases |
@@ -242,6 +245,7 @@ The kernel hard-aborts without CUDA, mounts CIFAR-10 from a private Kaggle datas
 | `colab_results/` | Colab-run artifacts (LoRA plots + log, earlier Phase 1/2 runs, Phase 3 v2 grid in `sessionD/`, corruption-family sessions E + F) |
 | `colab_results/kaggle_sessionF/` | Kaggle T4 corruption-grid artifacts: jpeg/contrast drift + uniform arms, nb2_contrast Phase-2 run, full kernel + per-arm logs |
 | `colab_gpu_bench.py`, `colab_probe.py` | Colab CLI probes: auth/runtime check + T4 throughput benchmark |
+| `docs/ASSESSMENT.md` | **Whole-project assessment** (start here for the big picture): what we set out to do, what we found, success scorecard, what's left and how — with mermaid diagrams |
 | `docs/RESEARCH.md` | **Full research narrative**: aim, hypotheses, methodology rationale, findings, bugs-as-lessons, limitations, future work |
 | `docs/METHODS.md` | Formal methods appendix: corruption parameter tables, CKA math, seed registry, environment versions |
 | `docs/DPA_DESIGN.md` | Design doc for Drift-Profiled Adaptation (DPA) + Selective Statistic Recalibration (SSR): gate outcome, allocation taxonomy, prior-art search log |

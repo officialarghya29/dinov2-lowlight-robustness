@@ -25,6 +25,7 @@ Root-level: [`../../AGENTS.md`](../../AGENTS.md) — agent operating instruction
 | File | Read it for |
 |---|---|
 | `README.md` | Top-level quickstart, claims registry, section list. |
+| `docs/ASSESSMENT.md` | **Whole-project assessment**: what we set out to do, what we found, success scorecard, what's left and how — with mermaid diagrams. Start here for the big picture. |
 | `docs/RESEARCH.md` | Master research narrative + all results. |
 | `docs/METHODS.md` | Methods, protocols, reference environment (§10). |
 | `docs/DPA_DESIGN.md` | Diagnostic-guided parameter (LoRA rank) allocation design. |
@@ -53,13 +54,13 @@ Root-level: [`../../AGENTS.md`](../../AGENTS.md) — agent operating instruction
 |---|---|
 | Ledger HEAD | `90577cbe171cefe98a551d05979bb8d74c6b986c` (`main`) |
 | Remotes | `origin` = ArindamTripathi619 fork; `upstream` = officialarghya29 |
-| Merge state | PRs #1–#4 merged (latest `0ad0ef5`, 2026-10-12); single lineage |
-| Tests | `python3 tests/run_tests.py` → 26/26 (custom runner, no pytest) |
+| Merge state | PRs #1–#6 merged upstream (latest `8ca8ca5`, PR #6); single lineage |
+| Tests | `python3 tests/run_tests.py` → 48/48 (custom runner, no pytest) |
 | Core library | `src/` — 10 modules |
-| Presentation | `index.html` (live site) ← built from `apps/presentation.py` — 1569 lines, 14 sections |
+| Presentation | `index.html` (live site) ← built from `apps/presentation.py` — 1887 lines, 15 sections |
 | Committed evidence | `results_pilot/` — 23 artifacts |
 | Configs | `configs/experiments.yaml` (full), `configs/pilot_cpu.yaml` (CPU pilot) |
-| CI | `ci.yml` (tests, py3.10/3.11), `security.yml` (weekly pip-audit) |
+| CI | `ci.yml` (tests, py3.10/3.11; **billing-locked since 2026-10-14** — local gate: `scripts/ci_local.sh`), `security.yml` (weekly pip-audit) |
 | Deploy | static site via Vercel (`tools/export_static_site.py`) |
 | Excluded/ignored | `upstream_src/` (dead), `.vercel/`, `data/`, `output/`, `colab_results/`, `logs/` |
 

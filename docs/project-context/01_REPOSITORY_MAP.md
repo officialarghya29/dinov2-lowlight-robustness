@@ -7,9 +7,9 @@
 ```
 dinov2-lowlight-robustness/
 ├── src/                     core importable library (10 modules)
-├── apps/                    presentation.py — site build source (1569 lines, 14 sections)
+├── apps/                    presentation.py — site build source (1893 lines, 15 sections)
 ├── tools/                   export_static_site.py — presentation.py → static site
-├── scripts/                 build_kaggle_kernel.py + scripts/kaggle/*.sh
+├── scripts/                 build_kaggle_kernel.py + ci_local.sh (local CI gate) + scripts/kaggle/*.sh
 ├── configs/                 experiments.yaml (full) + pilot_cpu.yaml (CPU pilot)
 ├── results_pilot/           23 committed pilot CSVs/JSON/numbers.tex (claim artifacts)
 ├── paper/                   manuscript + auto-generated tables/figures + vendored style
@@ -21,7 +21,7 @@ dinov2-lowlight-robustness/
 ├── data/  output/  colab_results/  logs/   large run artifacts (excluded)
 ├── upstream_src/            dead byte-identical copy of src/ (excluded)
 ├── .vercel/                 generated deploy mirror (excluded)
-├── *.py (31)                root runners / analysis / figure builders
+├── *.py (33)                root runners / analysis / figure builders
 ├── *.ipynb (4)              self-contained phase notebooks
 ├── *.sh                     background-launch helpers
 ├── index.html  vercel.json  static deploy
@@ -44,7 +44,8 @@ PRESENTATION_SECTION=<name>`) modes used by the static exporter.
 `export_static_site.py` renders each section to HTML/PNG for the Vercel site.
 
 ### `scripts/` — remote runners
-Kaggle kernel builder + GPU shell wrappers.
+Kaggle kernel builder + GPU shell wrappers + `ci_local.sh` (reproduces the CI matrix
+locally while GitHub Actions is billing-locked — see `06 §3`).
 
 ### `configs/` — configuration (single source of truth)
 `experiments.yaml` (full-scale; embedded SHA-256 into results manifest) and
@@ -69,7 +70,7 @@ The research record (see `10_CONTEXT_INDEX.md` for a reading order).
 `ci.yml` (tests + torch-free import smoke on py3.10/3.11) and `security.yml` (weekly
 pip-audit).
 
-## Root Python scripts (31) — grouped
+## Root Python scripts (33) — grouped
 
 - **Harness / registry:** `run_experiments.py`
 - **Phase runners (local/Colab):** `run_notebook1{,_colab}.py`,
@@ -78,13 +79,14 @@ pip-audit).
   `run_lora_smoke_colab.py`
 - **Special studies:** `run_vitb_generality.py`, `run_corollaries.py`,
   `run_collapse_analysis.py`, `run_drift_profile.py`, `run_drift_proxy.py`,
+  `run_ssr.py`,
   `run_blur_adapter_eval.py`, `run_readout_repair.py`, `run_exdark_baseline.py`,
   `run_pilot_cpu.py`, `run_all_colab.py`
 - **Analysis:** `analyze_seeds.py`, `cka_recompute.py`, `cka_unbiased_recompute.py`,
   `colab_gpu_bench.py`, `colab_probe.py`
 - **Figure/table builders:** `make_paper_tables.py`, `make_paper_figures.py`,
   `make_mitigation_figure.py`, `make_readme_figures.py`
-- **Shared libs:** `stats_tools.py`, `utils.py`
+- **Shared libs:** `stats_tools.py`, `utils.py`, `agreement_report.py`
 
 ## Dead / generated trees (do not treat as source)
 
@@ -98,7 +100,7 @@ pip-audit).
 ## File counts (working tree, non-heavy)
 
 - `src/`: 10 python
-- root: 31 python, 4 notebooks, 4 shell scripts
+- root: 33 python, 4 notebooks, 4 shell scripts
 - `docs/`: 6 md (+ this `project-context/`)
 - `paper/`: 2 tex + 12 generated tex + 6 figures + style/bib/Makefile
 - `results_pilot/`: 23 artifacts
